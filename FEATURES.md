@@ -47,7 +47,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | Claude Code backend | ✅ | — | **done** | `claude -p`; set `default_backend` to `claude-cli` |
 | Streaming replies | ✅ | — | **done** | Discord status edit |
 | Telegram transport | ⚠️ coded | 🟢 | **P1 ★** | Enable second profile tokens |
-| File attachments | ❌ | 🟢 | **P1 ★** | Download Discord/TG files → paths in prompt (images + docs/etc.) |
+| File attachments | ✅ | — | **done** | Discord/TG → `data/attachments/`; paths in prompt (25 MiB / 10) |
 | Per-thread `/backend` | ❌ | 🟢 | **P1 ★** | Store in `sessions.json` |
 | Job queue + `/cancel` | ✅ | — | **done** | Graceful shutdown + `/rebuild` too |
 | OpenRouter chat | ✅ | — | **done** | Chat-only; `OPENROUTER_API_KEY` |
@@ -89,7 +89,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 4. ~~FastAPI admin UI + allowlist~~ ✅  
 5. ~~`/cancel` + graceful shutdown + self-rebuild~~ ✅  
 6. ~~Admin live status + OpenRouter~~ ✅  
-7. Telegram enable → ~~Claude backend~~ → file attachments  
+7. Telegram enable → ~~Claude backend~~ → ~~file attachments~~ ✅  
 8. Phase 2/3: session hygiene, master slash dispatch, bindings  
 9. cursor-sdk / cron / notifications / per-thread `/backend`  
 

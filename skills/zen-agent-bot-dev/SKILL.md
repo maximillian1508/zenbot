@@ -161,7 +161,7 @@ See also **Decisions (2026-08-12)** in `ROADMAP.md`.
 3. ~~**Admin live status**~~ ✅ — `/status`, `/api/status`, running jobs, last errors, `agent status`
 4. **Telegram enable** — transport coded; flip in admin + tokens when user wants
 5. ~~**Claude Code backend**~~ ✅ — `claude -p`; set agent `default_backend` to `claude-cli` (needs host `claude` login)
-6. **File attachments** — download Discord (then Telegram) attachments to `data/attachments/`, inject absolute paths into the prompt so the agent can open them (images via Read; other files via path)
+6. ~~**File attachments**~~ ✅ — Discord/Telegram files → `data/attachments/`; paths injected into prompt (images via Read; other files by path; 25 MiB / 10 files)
 
 **Done (out of prior P2):** OpenRouter chat backend (`OPENROUTER_API_KEY`; set agent `default_backend` to `openrouter`; chat-only).
 

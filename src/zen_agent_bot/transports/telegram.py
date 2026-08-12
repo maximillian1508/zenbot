@@ -2,16 +2,37 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from ..agents.profile import AgentProfile
-from ..gateway.router import Gateway, title_from_prompt
-from ..sessions import ThreadSession
+from ..attachments import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_FILES,
+    SavedAttachment,
+    attachments_dir,
+    merge_prompt_with_attachments,
+    write_attachment,
+)
+from ..gateway.router import Gateway
 
 log = logging.getLogger(__name__)
 
 TELEGRAM_CHUNK = 4000
+
+# Text and/or common file types (caption provides text for media).
+_TG_CONTENT = (
+    filters.TEXT
+    | filters.CAPTION
+    | filters.Document.ALL
+    | filters.PHOTO
+    | filters.VIDEO
+    | filters.AUDIO
+    | filters.VOICE
+    | filters.ANIMATION
+) & ~filters.COMMAND
 
 
 async def send_chunks(reply_fn, text: str) -> None:  # noqa: ANN001
@@ -22,6 +43,109 @@ async def send_chunks(reply_fn, text: str) -> None:  # noqa: ANN001
     while start < len(text):
         await reply_fn(text[start : start + TELEGRAM_CHUNK])
         start += TELEGRAM_CHUNK
+
+
+async def _download_tg_file(
+    bot,  # noqa: ANN001
+    *,
+    file_id: str,
+    dest_dir: Path,
+    filename: str,
+    content_type: str | None,
+) -> SavedAttachment | None:
+    try:
+        tg_file = await bot.get_file(file_id)
+        data = bytes(await tg_file.download_as_bytearray())
+    except Exception:
+        log.exception("Failed to download Telegram file %s", file_id)
+        return None
+    return await write_attachment(
+        dest_dir,
+        filename=filename,
+        data=data,
+        content_type=content_type,
+        original_name=filename,
+    )
+
+
+async def save_telegram_attachments(
+    message,  # noqa: ANN001
+    bot,  # noqa: ANN001
+    dest_dir: Path,
+) -> list[SavedAttachment]:
+    saved: list[SavedAttachment] = []
+
+    async def add(
+        file_id: str,
+        filename: str,
+        content_type: str | None,
+        size: int | None = None,
+    ) -> None:
+        if len(saved) >= DEFAULT_MAX_FILES:
+            return
+        if size is not None and size > DEFAULT_MAX_BYTES:
+            log.warning("Skip Telegram file %s — too large (%s)", filename, size)
+            return
+        item = await _download_tg_file(
+            bot,
+            file_id=file_id,
+            dest_dir=dest_dir,
+            filename=filename,
+            content_type=content_type,
+        )
+        if item:
+            saved.append(item)
+
+    if message.document:
+        doc = message.document
+        await add(
+            doc.file_id,
+            doc.file_name or f"document-{doc.file_unique_id}",
+            doc.mime_type,
+            doc.file_size,
+        )
+    if message.photo:
+        # Largest size last
+        photo = message.photo[-1]
+        await add(
+            photo.file_id,
+            f"photo-{photo.file_unique_id}.jpg",
+            "image/jpeg",
+            photo.file_size,
+        )
+    if message.video:
+        vid = message.video
+        await add(
+            vid.file_id,
+            vid.file_name or f"video-{vid.file_unique_id}.mp4",
+            vid.mime_type or "video/mp4",
+            vid.file_size,
+        )
+    if message.audio:
+        audio = message.audio
+        await add(
+            audio.file_id,
+            audio.file_name or f"audio-{audio.file_unique_id}",
+            audio.mime_type,
+            audio.file_size,
+        )
+    if message.voice:
+        voice = message.voice
+        await add(
+            voice.file_id,
+            f"voice-{voice.file_unique_id}.ogg",
+            voice.mime_type or "audio/ogg",
+            voice.file_size,
+        )
+    if message.animation:
+        anim = message.animation
+        await add(
+            anim.file_id,
+            anim.file_name or f"animation-{anim.file_unique_id}.mp4",
+            anim.mime_type,
+            anim.file_size,
+        )
+    return saved
 
 
 class TelegramAgentApp:
@@ -41,7 +165,7 @@ class TelegramAgentApp:
         if self.profile.is_manager:
             app.add_handler(CommandHandler("agents", self.cmd_agents))
             app.add_handler(CommandHandler("rebuild", self.cmd_rebuild))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_message))
+        app.add_handler(MessageHandler(_TG_CONTENT, self.on_message))
         return app
 
     def _chat_allowed(self, chat_id: int) -> bool:
@@ -123,32 +247,39 @@ class TelegramAgentApp:
         if not self._chat_allowed(update.effective_chat.id):
             return
 
-        prompt = update.message.text.strip()
-        if not prompt:
-            return
-
+        text = (update.message.text or update.message.caption or "").strip()
         chat_id = update.effective_chat.id
         thread_id = update.message.message_thread_id
         sess_key = self._session_key(chat_id, thread_id)
 
+        dest = attachments_dir(
+            self.gateway.config.data_dir,
+            transport="telegram",
+            thread_key=f"{chat_id}:{thread_id}" if thread_id else str(chat_id),
+        )
+        saved = await save_telegram_attachments(update.message, context.bot, dest)
+        prompt = merge_prompt_with_attachments(text, saved)
+        if not prompt:
+            return
+
         status = await update.message.reply_text("⏳ Agent running…")
         status_id = status.message_id
 
-        async def send(text: str) -> None:
+        async def send(out: str) -> None:
             await send_chunks(
                 lambda chunk: context.bot.send_message(
                     chat_id=chat_id,
                     text=chunk,
                     message_thread_id=thread_id,
                 ),
-                text,
+                out,
             )
 
-        async def edit_status(text: str) -> None:
+        async def edit_status(out: str) -> None:
             await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_id,
-                text=text[:4096],
+                text=out[:4096],
                 message_thread_id=thread_id,
             )
 

@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 
 from ..agents.profile import AgentProfile
+from ..attachments import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_FILES,
+    SavedAttachment,
+    attachments_dir,
+    merge_prompt_with_attachments,
+    write_attachment,
+)
 from ..gateway.router import Gateway, title_from_prompt
 from ..sessions import ThreadSession
 
@@ -43,6 +51,32 @@ def in_agent_channel(
         parent = ch.parent
         return parent is not None and parent.id == agent_channel_id
     return getattr(ch, "id", None) == agent_channel_id
+
+
+async def save_discord_attachments(
+    message: discord.Message,
+    dest_dir: Path,
+) -> list[SavedAttachment]:
+    saved: list[SavedAttachment] = []
+    for att in message.attachments[:DEFAULT_MAX_FILES]:
+        if att.size and att.size > DEFAULT_MAX_BYTES:
+            log.warning("Skip Discord attachment %s — too large (%s)", att.filename, att.size)
+            continue
+        try:
+            data = await att.read()
+        except Exception:
+            log.exception("Failed to download Discord attachment %s", att.filename)
+            continue
+        item = await write_attachment(
+            dest_dir,
+            filename=att.filename or f"attachment-{att.id}",
+            data=data,
+            content_type=att.content_type,
+            original_name=att.filename,
+        )
+        if item:
+            saved.append(item)
+    return saved
 
 
 class AgentDiscordBot(discord.Client):
@@ -191,23 +225,58 @@ class AgentDiscordBot(discord.Client):
         if not in_agent_channel(message, self.binding.agent_channel_id):
             return
 
-        prompt = message.content.strip()
-        if not prompt:
+        text = message.content.strip()
+        if not text and not message.attachments:
             return
 
         channel = message.channel
         agent_id = self.profile.id
         sess_key = self.gateway.session_key(agent_id, "discord", thread_key(channel))
 
+        dest = attachments_dir(
+            self.gateway.config.data_dir,
+            transport="discord",
+            thread_key=thread_key(channel),
+        )
+        saved = await save_discord_attachments(message, dest)
+        prompt = merge_prompt_with_attachments(text, saved)
+        if not prompt:
+            return
+
+        title_src = text or (saved[0].original_name if saved else "attachment")
+
         if isinstance(channel, discord.TextChannel) and channel.id == self.binding.agent_channel_id:
-            title = title_from_prompt(prompt)
+            title = title_from_prompt(title_src)
             thread = await channel.create_thread(name=title[:100], auto_archive_duration=10080)
+            preview = text[:500] if text else f"({len(saved)} attachment(s))"
             await thread.send(
                 f"**Task from** {message.author.mention}\n\n"
-                f"{prompt[:500]}{'…' if len(prompt) > 500 else ''}"
+                f"{preview}{'…' if text and len(text) > 500 else ''}"
             )
             channel = thread
             sess_key = self.gateway.session_key(agent_id, "discord", thread_key(thread))
+            # Re-home files under the new thread id when starting from the channel.
+            if saved:
+                new_dest = attachments_dir(
+                    self.gateway.config.data_dir,
+                    transport="discord",
+                    thread_key=thread_key(thread),
+                )
+                new_dest.mkdir(parents=True, exist_ok=True)
+                relocated: list[SavedAttachment] = []
+                for item in saved:
+                    target = new_dest / item.path.name
+                    item.path.replace(target)
+                    relocated.append(
+                        SavedAttachment(
+                            path=target.resolve(),
+                            original_name=item.original_name,
+                            size=item.size,
+                            content_type=item.content_type,
+                        )
+                    )
+                saved = relocated
+                prompt = merge_prompt_with_attachments(text, saved)
             self.gateway.store.set(sess_key, ThreadSession(session_id=None, title=title))
             status_msg = await thread.send("⏳ Agent running…")
             target = thread
@@ -215,11 +284,11 @@ class AgentDiscordBot(discord.Client):
             status_msg = await message.reply("⏳ Agent running…", mention_author=False)
             target = channel
 
-        async def send(text: str) -> None:
-            await send_chunks(target, text)
+        async def send(text_out: str) -> None:
+            await send_chunks(target, text_out)
 
-        async def edit_status(text: str) -> None:
-            await status_msg.edit(content=text)
+        async def edit_status(text_out: str) -> None:
+            await status_msg.edit(content=text_out)
 
         asyncio.create_task(
             self.gateway.run_job(

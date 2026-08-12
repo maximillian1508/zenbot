@@ -47,6 +47,7 @@ uv run zen-agent-bot
 |--------|-----|
 | **New task** | Post in the agent channel → bot creates a **thread** and runs Cursor agent |
 | **Follow-up** | Reply in the same thread (`--resume`). If a job is running, your message is **queued** |
+| **Attach files** | Drop images/docs in the thread (or with your message) — saved under `data/attachments/` and paths go into the prompt |
 | **Fresh session** | `/new` in the thread |
 | **Cancel in-flight job** | `/cancel` in the thread |
 | **Restart gateway** | `/rebuild` on **manager** (host `systemctl restart`) |

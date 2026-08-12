@@ -178,7 +178,7 @@ routing:
 4. ~~OpenRouter chat backend~~ ✅
 5. Telegram enable (when tokens ready)
 6. ~~Claude Code backend (`claude -p`)~~ ✅
-7. **File attachments** — Discord (then Telegram): download attachments to `data/attachments/`, inject absolute paths into the prompt (images via Read; any file type by path)
+7. ~~**File attachments**~~ ✅ — Discord/Telegram → `data/attachments/` + paths in prompt
 8. Session hygiene (Phase 2/3) + master slash dispatch (Phase 2/3)
 9. cursor-sdk / cron / notifications / per-thread `/backend`
 
@@ -197,13 +197,11 @@ Locked from planning with Maxi — keep these when picking backlog work.
 | **Persistent memory / @mention filtering in-model** | Out of scope. Gateway filters by channel/allowlist; no Hermes memory. |
 | **Interactive tool approve (Accept/Deny)** | **P3+, after cursor-sdk.** Today CLI uses `--force` (no per-tool prompts). Near-term control = allowlist + `/cancel` + channel isolation. Discord Accept/Deny buttons need an SDK (or non-force) bridge that emits pending tool calls — not on P1/P2. |
 
-**P1 queue:** ~~`/cancel`~~ → ~~graceful shutdown~~ → ~~admin live status~~ → Telegram → ~~Claude backend~~ → **file attachments**.
+**P1 queue:** ~~`/cancel`~~ → ~~graceful shutdown~~ → ~~admin live status~~ → Telegram → ~~Claude backend~~ → ~~file attachments~~.
 
-**Done extras:** OpenRouter chat backend; Claude Code backend (`claude-cli`; host `claude` login + agent `default_backend`).
+**Done extras:** OpenRouter chat backend; Claude Code backend; file attachments (Discord/TG → `data/attachments/`, paths in prompt; 25 MiB / 10 files).
 
 **P2/P3 (explicitly wanted):** session hygiene · master slash dispatch · bindings/routing · per-thread `/backend` · cursor-sdk · cron · job-done notify · OpenRouter.
-
-**File attachments (P1):** Today Discord only forwards `message.content` text. Plan: save all attachments under `data/attachments/<thread>/`, append absolute paths to the prompt. Images: cursor-cli Read (jpeg/png/gif/webp). Other files (pdf, zip, logs, …): agent opens by path. Size/type limits + cleanup TBD. OpenRouter multimodal deferred.
 
 **P3+ (deferred):** interactive tool approve from Discord — depends on cursor-sdk (or equivalent) approval events.
 
