@@ -53,14 +53,38 @@ class _QueuedJob:
 class _RunHandle:
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     proc: asyncio.subprocess.Process | None = None
+    cancel_reason: str = "stopped"
 
     def register_proc(self, proc: asyncio.subprocess.Process) -> None:
         self.proc = proc
 
-    async def cancel(self) -> None:
+    async def cancel(self, reason: str = "stopped by /cancel") -> None:
+        self.cancel_reason = reason
         self.cancel_event.set()
         if self.proc is not None:
             await terminate_process(self.proc)
+
+
+def _cancelled_status_message(
+    *,
+    existing: str,
+    display_name: str,
+    reason: str,
+    limit: int = 2000,
+) -> str:
+    """Keep streamed/partial text and append a cancel note (do not wipe)."""
+    footer = f"\n\n———\n🛑 **Cancelled** · {display_name}\n_{reason}_"
+    body = (existing or "").strip()
+    if not body or body in ("Cancelled.", "Agent run timed out.", "⏳ Agent running…"):
+        bare = f"🛑 **Cancelled** · {display_name}\n_{reason}_"
+        return bare[:limit]
+
+    room = limit - len(footer)
+    if room < 80:
+        return f"🛑 **Cancelled** · {display_name}\n_{reason}_"[:limit]
+    if len(body) > room:
+        body = body[: room - 20].rstrip() + "\n\n_(truncated)_"
+    return body + footer
 
 
 @dataclass
@@ -176,7 +200,7 @@ class Gateway:
         state = self._sessions.get(session_key)
         if state is None or not state.busy or state.run_handle is None:
             return False
-        await state.run_handle.cancel()
+        await state.run_handle.cancel("stopped by /cancel")
         return True
 
     async def shutdown(self, grace_sec: float = 180.0) -> None:
@@ -196,7 +220,10 @@ class Gateway:
             for key in busy_keys:
                 state = self._sessions[key]
                 if state.run_handle is not None:
-                    await state.run_handle.cancel()
+                    await state.run_handle.cancel(
+                        "gateway restart — shutdown grace expired "
+                        f"({int(grace_sec)}s); reply kept above"
+                    )
 
             cancel_deadline = time.monotonic() + 10.0
             while time.monotonic() < cancel_deadline:
@@ -303,7 +330,19 @@ class Gateway:
                     await progress.flush()
 
         if result.error == "cancelled":
-            await job.edit_status(f"🛑 **Cancelled** · {profile.display_name}")
+            # Prefer last streamed Discord/Telegram status over backend stub text.
+            existing = ""
+            if progress and progress.latest.strip():
+                existing = progress.latest
+            else:
+                existing = (result.text or "").strip()
+            await job.edit_status(
+                _cancelled_status_message(
+                    existing=existing,
+                    display_name=profile.display_name,
+                    reason=run_handle.cancel_reason,
+                )
+            )
             if result.session_id:
                 title = sess.title or title_from_prompt(job.user_prompt)
                 self.store.set(
@@ -321,16 +360,23 @@ class Gateway:
         header = f"{prefix} **{profile.display_name}**"
         if result.session_id:
             header += f" · session `{result.session_id[:8]}…`"
-        await job.edit_status(header)
 
         body = result.text
         if result.error and result.exit_code != 0:
             body += f"\n\n```\n{result.error[:1500]}\n```"
 
         display = body[:8000] if len(body) > 8000 else body
-        await job.send(display)
-        if len(body) > 8000:
-            await job.send(f"_(truncated — full output was {len(body)} chars)_")
+        # Finish on the same status message that streamed progress (Discord ≤2k).
+        # Overflow only → send(), which transports attach to that status.
+        status_limit = 1900
+        combined = f"{header}\n\n{display}" if display.strip() else header
+        if len(combined) <= status_limit:
+            await job.edit_status(combined)
+        else:
+            await job.edit_status(header)
+            await job.send(display)
+            if len(body) > 8000:
+                await job.send(f"_(truncated — full output was {len(body)} chars)_")
 
         title = sess.title or title_from_prompt(job.user_prompt)
         self.store.set(

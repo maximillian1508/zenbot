@@ -17,6 +17,11 @@ class ThrottledProgress:
         self._latest = ""
         self._lock = asyncio.Lock()
 
+    @property
+    def latest(self) -> str:
+        """Last progress text pushed (may not have been flushed yet)."""
+        return self._latest
+
     async def push(self, text: str) -> None:
         async with self._lock:
             self._latest = text
