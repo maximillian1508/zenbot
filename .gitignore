@@ -1,0 +1,27 @@
+# secrets / local env
+.env
+.env.*
+!.env.example
+
+# runtime data (SQLite, logs, local seed config)
+data/*
+!data/config.example.yaml
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# logs
+*.log

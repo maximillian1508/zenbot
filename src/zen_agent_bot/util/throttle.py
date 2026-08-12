@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+import asyncio
+import time
+from typing import Awaitable, Callable
+
+ProgressCallback = Callable[[str], Awaitable[None]]
+
+
+class ThrottledProgress:
+    """Rate-limit progress callbacks (e.g. Discord message edits)."""
+
+    def __init__(self, callback: ProgressCallback, *, min_interval: float = 1.5) -> None:
+        self._callback = callback
+        self._min_interval = min_interval
+        self._last = 0.0
+        self._latest = ""
+        self._lock = asyncio.Lock()
+
+    async def push(self, text: str) -> None:
+        async with self._lock:
+            self._latest = text
+            now = time.monotonic()
+            if now - self._last >= self._min_interval:
+                self._last = now
+                await self._callback(text)
+
+    async def flush(self) -> None:
+        async with self._lock:
+            if not self._latest:
+                return
+            await self._callback(self._latest)
+            self._last = time.monotonic()

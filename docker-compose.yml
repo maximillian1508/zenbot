@@ -1,0 +1,41 @@
+services:
+  zen-agent-bot:
+    build: .
+    image: ${IMAGE_NAME:-zen-agent-bot:local}
+    container_name: ${CONTAINER_NAME:-zen-agent-bot}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      HOME: ${CONTAINER_HOME:-/home/agent}
+      ZEN_AGENT_DATA_DIR: /app/data
+      ZEN_AGENT_DB: /app/data/gateway.db
+      ZEN_AGENT_CONFIG: /app/data/config.yaml
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${HOST_DATA_DIR:-./data}:/app/data
+      - ${HOST_AGENTS_DIR:-./agents}:/app/agents:ro
+      # Cursor CLI + auth (required for agent runs — set paths in .env on your host)
+      - ${HOST_HOME}:${CONTAINER_HOME:-/home/agent}
+      - ${CURSOR_AGENT_DIR}:${CONTAINER_HOME:-/home/agent}/.local/share/cursor-agent:ro
+      - ${CURSOR_BIN}:/usr/local/bin/agent:ro
+      - ${CURSOR_CONFIG_DIR}:${CONTAINER_HOME:-/home/agent}/.cursor
+      - ${CURSOR_APP_CONFIG_DIR}:${CONTAINER_HOME:-/home/agent}/.config/cursor
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.${TRAEFIK_ROUTER:-zen-agent-admin}.rule=Host(`${TRAEFIK_HOST}`)
+      - traefik.http.routers.${TRAEFIK_ROUTER:-zen-agent-admin}.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.${TRAEFIK_ROUTER:-zen-agent-admin}.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      - traefik.http.services.${TRAEFIK_ROUTER:-zen-agent-admin}.loadbalancer.server.port=8787
+    networks:
+      - proxy
+    deploy:
+      resources:
+        limits:
+          memory: ${MEMORY_LIMIT:-2048M}
+
+networks:
+  proxy:
+    external: true
+    name: ${TRAEFIK_NETWORK:-proxy}

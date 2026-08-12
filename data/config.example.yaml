@@ -1,0 +1,54 @@
+# zen-agent-bot gateway config (copy to data/config.yaml for first-run seed → SQLite)
+
+server:
+  data_dir: ./data
+  max_concurrent_jobs: 2
+  admin_listen: 127.0.0.1:8787
+  admin_enabled: true
+
+# Discord or Telegram user IDs allowed to use the bots
+allowed_user_ids:
+  - 123456789012345678  # replace with your user ID
+
+# Optional: faster slash-command sync during setup
+discord_guild_id: null  # or your guild ID integer
+
+backends:
+  cursor-cli:
+    kind: cursor-cli
+    command: agent
+    force: true
+    # model: composer-2.5
+
+agents:
+  manager:
+    display_name: Zen Manager
+    is_manager: true
+    workspace: /home/you
+    default_backend: cursor-cli
+    system_prompt_file: agents/manager/SOUL.md
+    skills: []
+    discord:
+      enabled: true
+      token_env: DISCORD_TOKEN_MANAGER
+      agent_channel_id: 1234567890123456789
+    telegram:
+      enabled: false
+      token_env: TELEGRAM_TOKEN_MANAGER
+      # agent_chat_id: null  # optional: restrict to one group/DM
+
+  music:
+    display_name: Zen Music
+    is_manager: false
+    workspace: /home/you
+    default_backend: cursor-cli
+    system_prompt_file: agents/music/SOUL.md
+    skills: []
+    discord:
+      enabled: true
+      token_env: DISCORD_TOKEN_MUSIC
+      agent_channel_id: 1234567890123456790
+    telegram:
+      enabled: false
+      token_env: TELEGRAM_TOKEN_MUSIC
+      # agent_chat_id: null
