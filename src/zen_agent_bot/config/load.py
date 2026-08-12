@@ -103,6 +103,18 @@ def load_config() -> GatewayConfig:
         db.get_setting("backend.openrouter.base_url")
         or "https://openrouter.ai/api/v1"
     )
+    claude_command = (
+        os.environ.get("CLAUDE_BIN")
+        or db.get_setting("backend.claude-cli.command")
+        or "claude"
+    )
+    claude_force = _truthy(
+        os.environ.get("CLAUDE_FORCE") or db.get_setting("backend.claude-cli.force"),
+        True,
+    )
+    claude_model = (
+        os.environ.get("CLAUDE_MODEL") or db.get_setting("backend.claude-cli.model") or None
+    )
     backends = build_backends(
         {
             "cursor-cli": {
@@ -110,6 +122,12 @@ def load_config() -> GatewayConfig:
                 "command": command,
                 "force": force,
                 "model": model,
+            },
+            "claude-cli": {
+                "kind": "claude-cli",
+                "command": claude_command,
+                "force": claude_force,
+                "model": claude_model,
             },
             "openrouter": {
                 "kind": "openrouter",

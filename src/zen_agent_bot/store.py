@@ -309,6 +309,15 @@ class ConfigStore:
             self.set_setting("backend.openrouter.api_key_env", str(or_cfg["api_key_env"]))
         if or_cfg.get("base_url"):
             self.set_setting("backend.openrouter.base_url", str(or_cfg["base_url"]))
+        claude = backends.get("claude-cli") or {}
+        if claude.get("command"):
+            self.set_setting("backend.claude-cli.command", str(claude["command"]))
+        if "force" in claude:
+            self.set_setting(
+                "backend.claude-cli.force", "true" if claude["force"] else "false"
+            )
+        if claude.get("model"):
+            self.set_setting("backend.claude-cli.model", str(claude["model"]))
         return True
 
     def migrate_sessions_json(self, path: Path) -> None:

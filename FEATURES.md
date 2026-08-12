@@ -44,9 +44,10 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | **Web admin UI** | ⚠️ building | 🟡 2–3d | **P0 — now** | Config, allowlist, sessions, restart hint |
 | **systemd unit** | ❌ | 🟢 30m | **P0 ★** | Auto-start + restart on crash |
 | **Allowlist in admin** | ✅ YAML only | 🟢 | **P0 ★** | Edit `allowed_user_ids` in UI |
-| Claude Code backend | ❌ | 🟢 | **P1 ★** | `claude -p` subprocess adapter |
+| Claude Code backend | ✅ | — | **done** | `claude -p`; set `default_backend` to `claude-cli` |
 | Streaming replies | ✅ | — | **done** | Discord status edit |
 | Telegram transport | ⚠️ coded | 🟢 | **P1 ★** | Enable second profile tokens |
+| File attachments | ❌ | 🟢 | **P1 ★** | Download Discord/TG files → paths in prompt (images + docs/etc.) |
 | Per-thread `/backend` | ❌ | 🟢 | **P1 ★** | Store in `sessions.json` |
 | Job queue + `/cancel` | ✅ | — | **done** | Graceful shutdown + `/rebuild` too |
 | OpenRouter chat | ✅ | — | **done** | Chat-only; `OPENROUTER_API_KEY` |
@@ -88,7 +89,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 4. ~~FastAPI admin UI + allowlist~~ ✅  
 5. ~~`/cancel` + graceful shutdown + self-rebuild~~ ✅  
 6. ~~Admin live status + OpenRouter~~ ✅  
-7. Telegram enable → Claude backend  
+7. Telegram enable → ~~Claude backend~~ → file attachments  
 8. Phase 2/3: session hygiene, master slash dispatch, bindings  
 9. cursor-sdk / cron / notifications / per-thread `/backend`  
 

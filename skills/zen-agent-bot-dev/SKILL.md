@@ -81,7 +81,7 @@ The process runs as **maxi** with normal host access (`~/.ssh`, `agent`, `/srv`,
 | Cursor CLI backend | `src/zen_agent_bot/backends/cursor_cli.py` |
 | Discord / Telegram | `src/zen_agent_bot/transports/` |
 | Admin UI | `src/zen_agent_bot/web/app.py` (`/status` live jobs) |
-| Cursor CLI / OpenRouter | `src/zen_agent_bot/backends/` |
+| Cursor / Claude / OpenRouter | `src/zen_agent_bot/backends/` |
 | Prompt build | `src/zen_agent_bot/skills/loader.py` |
 
 ## Git commits (mandatory)
@@ -160,7 +160,8 @@ See also **Decisions (2026-08-12)** in `ROADMAP.md`.
 2. ~~**Graceful shutdown**~~ ✅
 3. ~~**Admin live status**~~ ✅ — `/status`, `/api/status`, running jobs, last errors, `agent status`
 4. **Telegram enable** — transport coded; flip in admin + tokens when user wants
-5. **Claude Code backend** — `claude -p` subprocess adapter
+5. ~~**Claude Code backend**~~ ✅ — `claude -p`; set agent `default_backend` to `claude-cli` (needs host `claude` login)
+6. **File attachments** — download Discord (then Telegram) attachments to `data/attachments/`, inject absolute paths into the prompt so the agent can open them (images via Read; other files via path)
 
 **Done (out of prior P2):** OpenRouter chat backend (`OPENROUTER_API_KEY`; set agent `default_backend` to `openrouter`; chat-only).
 

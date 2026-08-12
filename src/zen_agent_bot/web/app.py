@@ -260,7 +260,8 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         body = f"""
         <p>Agent profiles live in SQLite. Bot <strong>tokens</strong> stay in <code>.env</code>
         (referenced by <code>token_env</code>). Backend <code>openrouter</code> needs
-        <code>OPENROUTER_API_KEY</code> in <code>.env</code> (chat-only, no shell).</p>
+        <code>OPENROUTER_API_KEY</code> (chat-only). Backend <code>claude-cli</code> needs
+        the <code>claude</code> binary logged in on the host (Pro/Max).</p>
         <table>
           <tr><th>ID</th><th>Name</th><th>Manager</th><th>Backend</th><th>Discord</th><th>Channel</th><th>Token env</th><th>Telegram</th><th></th></tr>
           {''.join(rows_html) or '<tr><td colspan=9><em>none</em></td></tr>'}
@@ -285,7 +286,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
           <label>ID<br><input type="text" name="id" value="{html.escape(str(r.get('id') or ''))}" required></label>
           <label>Display name<br><input type="text" name="display_name" value="{html.escape(str(r.get('display_name') or ''))}" required></label>
           <label>Workspace<br><input type="text" name="workspace" value="{html.escape(str(r.get('workspace') or '/home/maxi'))}"></label>
-          <label>Default backend (<code>cursor-cli</code> or <code>openrouter</code>)<br>
+          <label>Default backend (<code>cursor-cli</code>, <code>claude-cli</code>, or <code>openrouter</code>)<br>
             <input type="text" name="default_backend" value="{html.escape(str(r.get('default_backend') or 'cursor-cli'))}"></label>
           <label>Skills (one path per line)<br><textarea name="skills">{html.escape(str(skills))}</textarea></label>
           <label>System prompt file<br><input type="text" name="system_prompt_file" value="{html.escape(str(r.get('system_prompt_file') or ''))}"></label>
@@ -297,7 +298,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
           <h3>Telegram</h3>
           <p class="warn">Optional — leave disabled until you create bots via @BotFather,
           add <code>TELEGRAM_TOKEN_*</code> to <code>.env</code>, add your Telegram user ID to
-          Allowlist, then enable and restart the container.</p>
+          Allowlist, then enable and restart the service.</p>
           <label><input type="checkbox" name="telegram_enabled" {checked('telegram_enabled')}> Enabled</label>
           <label>Token env<br><input type="text" name="telegram_token_env" value="{html.escape(str(r.get('telegram_token_env') or ''))}" placeholder="TELEGRAM_TOKEN_MANAGER"></label>
           <label>Chat ID (optional — restrict to one group/DM)<br><input type="text" name="telegram_chat_id" value="{html.escape(str(r.get('telegram_chat_id') or ''))}"></label>

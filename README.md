@@ -60,6 +60,10 @@ Status messages **stream live** during runs (`STREAMING=false` to disable).
 
 Chat-only backend (no shell/tools). Set `OPENROUTER_API_KEY` in `.env`, optionally `OPENROUTER_MODEL`, then set an agent's **default backend** to `openrouter` in the admin UI and **restart**. Good for cheap Q&A; keep `cursor-cli` for server/code work.
 
+## Claude Code (optional)
+
+Coding agent via `claude -p` (Claude Pro/Max subscription). Install Claude Code on the host, run `claude` once to log in, set an agent's **default backend** to `claude-cli`, then **restart**. Uses `--dangerously-skip-permissions` when `CLAUDE_FORCE=true` (default). Use `/new` when switching backends on a thread (session IDs are not shared with cursor-cli).
+
 ## Telegram (optional)
 
 Transport is implemented but **off by default**. Enable per agent in admin UI after adding `TELEGRAM_TOKEN_*` to `.env` and your Telegram user ID to the allowlist. Restart the service after enabling.
