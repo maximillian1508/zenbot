@@ -46,6 +46,8 @@ async def _shutdown_services(
     admin_servers: list[uvicorn.Server],
 ) -> None:
     await shutdown_event.wait()
+    # Keep ≤ systemd TimeoutStopSec. Host unit sets SHUTDOWN_GRACE_SEC=600
+    # with TimeoutStopSec=620 after `install-host-service.sh` / unit copy.
     grace = float(os.environ.get("SHUTDOWN_GRACE_SEC", "180"))
     log.info("Shutdown signal received (grace=%ss)", grace)
     await gateway.shutdown(grace_sec=grace)

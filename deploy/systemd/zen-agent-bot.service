@@ -15,10 +15,13 @@ EnvironmentFile=-/home/maxi/apps/zen-agent-bot/.env
 # Prefer absolute data paths on host
 Environment=ZEN_AGENT_DATA_DIR=/home/maxi/apps/zen-agent-bot/data
 Environment=AGENT_WORKSPACE=/home/maxi
+# Wait for in-flight agent jobs on stop/restart (must be < TimeoutStopSec).
+Environment=SHUTDOWN_GRACE_SEC=600
 ExecStart=/home/maxi/.local/bin/uv run --directory /home/maxi/apps/zen-agent-bot zen-agent-bot
 Restart=on-failure
 RestartSec=5
-TimeoutStopSec=190
+# Must be > SHUTDOWN_GRACE_SEC so gateway can wait for in-flight jobs.
+TimeoutStopSec=620
 KillMode=mixed
 # Soft memory guard (matches former compose limit intent)
 MemoryMax=2G
