@@ -38,6 +38,21 @@ async def send_chunks(target: Messageable, text: str) -> None:
         start += DISCORD_CHUNK
 
 
+async def send_chunks_reply(status_msg: discord.Message, text: str) -> None:
+    """Send final output as replies to this job's status message.
+
+    Bare channel.send() lands after any messages posted while the job ran
+    (e.g. a queued follow-up), so the reply looks attached to the wrong turn.
+    """
+    if len(text) <= DISCORD_CHUNK:
+        await status_msg.reply(text, mention_author=False)
+        return
+    start = 0
+    while start < len(text):
+        await status_msg.reply(text[start : start + DISCORD_CHUNK], mention_author=False)
+        start += DISCORD_CHUNK
+
+
 def thread_key(channel: discord.abc.GuildChannel | discord.Thread) -> str:
     return str(channel.id)
 
@@ -279,16 +294,18 @@ class AgentDiscordBot(discord.Client):
                 prompt = merge_prompt_with_attachments(text, saved)
             self.gateway.store.set(sess_key, ThreadSession(session_id=None, title=title))
             status_msg = await thread.send("⏳ Agent running…")
-            target = thread
         else:
             status_msg = await message.reply("⏳ Agent running…", mention_author=False)
-            target = channel
 
-        async def send(text_out: str) -> None:
-            await send_chunks(target, text_out)
+        # Bind message objects as defaults so each job keeps its own status
+        # target even if the enclosing locals were ever rebound.
+        async def send(text_out: str, *, _status: discord.Message = status_msg) -> None:
+            await send_chunks_reply(_status, text_out)
 
-        async def edit_status(text_out: str) -> None:
-            await status_msg.edit(content=text_out)
+        async def edit_status(
+            text_out: str, *, _status: discord.Message = status_msg
+        ) -> None:
+            await _status.edit(content=text_out)
 
         asyncio.create_task(
             self.gateway.run_job(

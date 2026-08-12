@@ -265,22 +265,35 @@ class TelegramAgentApp:
         status = await update.message.reply_text("⏳ Agent running…")
         status_id = status.message_id
 
-        async def send(out: str) -> None:
+        async def send(
+            out: str,
+            *,
+            _chat_id: int = chat_id,
+            _thread_id: int | None = thread_id,
+            _reply_to: int = status_id,
+        ) -> None:
             await send_chunks(
                 lambda chunk: context.bot.send_message(
-                    chat_id=chat_id,
+                    chat_id=_chat_id,
                     text=chunk,
-                    message_thread_id=thread_id,
+                    message_thread_id=_thread_id,
+                    reply_to_message_id=_reply_to,
                 ),
                 out,
             )
 
-        async def edit_status(out: str) -> None:
+        async def edit_status(
+            out: str,
+            *,
+            _chat_id: int = chat_id,
+            _thread_id: int | None = thread_id,
+            _status_id: int = status_id,
+        ) -> None:
             await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=status_id,
+                chat_id=_chat_id,
+                message_id=_status_id,
                 text=out[:4096],
-                message_thread_id=thread_id,
+                message_thread_id=_thread_id,
             )
 
         asyncio.create_task(
