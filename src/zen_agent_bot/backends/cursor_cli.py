@@ -292,11 +292,11 @@ class CursorCliBackend:
                     await on_progress(_format_progress(phase=phase, text=assistant_text))
                 elif etype == "assistant":
                     chunk = _assistant_text(event)
-                    if chunk:
-                        if event.get("timestamp_ms"):
-                            assistant_text += chunk
-                        else:
-                            assistant_text = chunk
+                    if chunk and _is_streaming_delta(event):
+                        # --stream-partial-output: only timestamp_ms without
+                        # model_call_id is new text; other assistant events are
+                        # duplicate flushes (see Cursor output-format docs).
+                        assistant_text += chunk
                         phase = "writing"
                         await on_progress(_format_progress(phase=phase, text=assistant_text))
                 elif etype in ("tool_call", "tool", "function_call"):
@@ -372,6 +372,11 @@ class CursorCliBackend:
             exit_code=exit_code,
             error=stderr[:2000] if exit_code != 0 and stderr else None,
         )
+
+
+def _is_streaming_delta(event: dict) -> bool:
+    """True only for real-time --stream-partial-output deltas (not duplicate flushes)."""
+    return bool(event.get("timestamp_ms")) and not event.get("model_call_id")
 
 
 def _assistant_text(event: dict) -> str:
