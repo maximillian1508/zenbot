@@ -3,13 +3,18 @@ from __future__ import annotations
 import html
 import os
 import secrets
-from typing import Any
+import time
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from ..store import ConfigStore
+
+if TYPE_CHECKING:
+    from ..gateway import Gateway
 
 security = HTTPBasic(auto_error=False)
 
@@ -20,11 +25,13 @@ table { border-collapse: collapse; width: 100%; }
 th, td { border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
 .msg { padding: 0.75rem; background: #e8f5e9; border-radius: 4px; margin-bottom: 1rem; }
 .warn { background: #fff3e0; }
+.err { background: #ffebee; }
 code { background: #f4f4f4; padding: 0.1rem 0.3rem; }
 input[type=text], textarea { width: 100%; max-width: 520px; }
 textarea { min-height: 4rem; }
 label { display: block; margin: 0.6rem 0; }
 button { padding: 0.4rem 0.8rem; cursor: pointer; }
+.muted { color: #666; font-size: 0.9rem; }
 """
 
 
@@ -55,23 +62,29 @@ def require_auth(
         )
 
 
-def create_admin_app(*, db: ConfigStore, gateway=None) -> FastAPI:
-    _ = gateway
+def _fmt_ts(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> FastAPI:
     app = FastAPI(title="zen-agent-bot admin", docs_url=None, redoc_url=None)
 
-    def page(title: str, body: str, msg: str = "") -> HTMLResponse:
+    def page(title: str, body: str, msg: str = "", *, refresh: int | None = None) -> HTMLResponse:
         nav = """
         <nav>
           <a href="/">Dashboard</a>
+          <a href="/status">Status</a>
           <a href="/allowlist">Allowlist</a>
           <a href="/agents">Agents</a>
           <a href="/sessions">Sessions</a>
         </nav>
         """
         banner = f'<div class="msg">{msg}</div>' if msg else ""
+        meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
         html_out = (
-            f"<!DOCTYPE html><html><head><meta charset=utf-8><title>{title}</title>"
-            f"<style>{BASE_STYLE}</style></head><body>{nav}{banner}<h1>{title}</h1>{body}</body></html>"
+            f"<!DOCTYPE html><html><head><meta charset=utf-8>{meta}"
+            f"<title>{title}</title><style>{BASE_STYLE}</style></head>"
+            f"<body>{nav}{banner}<h1>{title}</h1>{body}</body></html>"
         )
         return HTMLResponse(html_out)
 
@@ -86,6 +99,14 @@ def create_admin_app(*, db: ConfigStore, gateway=None) -> FastAPI:
             if pw
             else "<strong>No password</strong> — set ADMIN_PASSWORD in .env"
         )
+        live = ""
+        if gateway is not None:
+            st = gateway.live_status()
+            live = (
+                f"<li>Live: <strong>{st['running_count']}</strong> running, "
+                f"{st['queued_threads']} queued thread(s) — "
+                f'<a href="/status">Status</a></li>'
+            )
         body = f"""
         <p>Database: <code>{html.escape(str(db.path))}</code></p>
         <p>Auth: {auth_note}</p>
@@ -94,12 +115,96 @@ def create_admin_app(*, db: ConfigStore, gateway=None) -> FastAPI:
           <li>Telegram-ready profiles: {tg_ready} (enable in Agents when you add tokens)</li>
           <li>Allowlist: {len(allowed)} user(s) — live, no restart</li>
           <li>Sessions: {len(db.list_sessions())}</li>
+          {live}
         </ul>
         <p class="warn">Allowlist/session edits apply immediately.
         <strong>New Discord/Telegram bots</strong> (new agent + token) need a container restart.</p>
         <pre>cd /srv/apps/zen-agent-bot && docker compose up -d --force-recreate</pre>
         """
         return page("Dashboard", body)
+
+    @app.get("/status", response_class=HTMLResponse)
+    async def status_page(_: None = Depends(require_auth)) -> HTMLResponse:
+        if gateway is None:
+            return page("Status", "<p class='warn'>Gateway not attached to admin app.</p>")
+
+        st = gateway.live_status()
+        agent_login = await gateway.cursor_agent_status()
+
+        run_rows = []
+        for job in st["running"]:
+            run_rows.append(
+                "<tr>"
+                f"<td><code>{html.escape(job['session_key'])}</code></td>"
+                f"<td>{html.escape(str(job['agent_id']))}</td>"
+                f"<td>{job['elapsed_sec']}s</td>"
+                f"<td>{html.escape(job['prompt_preview'])}</td>"
+                f"<td>{job['queue_behind']}</td>"
+                f"<td>{job['pid'] or '—'}</td>"
+                "</tr>"
+            )
+        q_rows = []
+        for item in st["queued"]:
+            q_rows.append(
+                f"<tr><td><code>{html.escape(item['session_key'])}</code></td>"
+                f"<td>{item['queued']}</td></tr>"
+            )
+        err_rows = []
+        for err in st["last_errors"][:10]:
+            err_rows.append(
+                "<tr>"
+                f"<td>{html.escape(_fmt_ts(err['at']))}</td>"
+                f"<td>{html.escape(str(err['agent_id']))}</td>"
+                f"<td><code>{html.escape(err['session_key'])}</code></td>"
+                f"<td>{html.escape(err['error'])}</td>"
+                "</tr>"
+            )
+
+        flags = []
+        if st["shutting_down"]:
+            flags.append("<span class='err msg'>Shutting down</span>")
+        if st["rebuild_pending"]:
+            flags.append("<span class='warn msg'>Rebuild pending</span>")
+        flag_html = " ".join(flags) if flags else "<span class='muted'>idle flags clear</span>"
+
+        body = f"""
+        <p class="muted">Auto-refresh 5s · <a href="/api/status">JSON</a></p>
+        <p>{flag_html}</p>
+        <p>Max concurrent: <code>{st['max_concurrent_jobs']}</code> ·
+           Streaming: <code>{st['streaming_enabled']}</code> ·
+           Backends: <code>{html.escape(', '.join(st['backends']))}</code></p>
+
+        <h2>Cursor agent login</h2>
+        <pre>{html.escape(agent_login)}</pre>
+
+        <h2>Running jobs ({st['running_count']})</h2>
+        <table>
+          <tr><th>Session</th><th>Agent</th><th>Elapsed</th><th>Prompt</th><th>Queued behind</th><th>PID</th></tr>
+          {''.join(run_rows) or '<tr><td colspan=6><em>none</em></td></tr>'}
+        </table>
+
+        <h2>Queued threads ({st['queued_threads']})</h2>
+        <table>
+          <tr><th>Session</th><th>Queued</th></tr>
+          {''.join(q_rows) or '<tr><td colspan=2><em>none</em></td></tr>'}
+        </table>
+
+        <h2>Last errors</h2>
+        <table>
+          <tr><th>When</th><th>Agent</th><th>Session</th><th>Error</th></tr>
+          {''.join(err_rows) or '<tr><td colspan=4><em>none</em></td></tr>'}
+        </table>
+        """
+        return page("Status", body, refresh=5)
+
+    @app.get("/api/status")
+    async def api_status(_: None = Depends(require_auth)) -> JSONResponse:
+        if gateway is None:
+            return JSONResponse({"error": "gateway not attached"}, status_code=503)
+        payload = gateway.live_status()
+        payload["cursor_agent_status"] = await gateway.cursor_agent_status()
+        payload["ts"] = time.time()
+        return JSONResponse(payload)
 
     @app.get("/allowlist", response_class=HTMLResponse)
     async def allowlist_get(_: None = Depends(require_auth)) -> HTMLResponse:
@@ -144,6 +249,7 @@ def create_admin_app(*, db: ConfigStore, gateway=None) -> FastAPI:
                 f"<td><code>{aid}</code></td>"
                 f"<td>{html.escape(str(row['display_name']))}</td>"
                 f"<td>{'yes' if row['is_manager'] else ''}</td>"
+                f"<td>{html.escape(str(row.get('default_backend') or 'cursor-cli'))}</td>"
                 f"<td>{'✓' if row['discord_enabled'] else ''}</td>"
                 f"<td>{html.escape(str(row['discord_channel_id'] or ''))}</td>"
                 f"<td><code>{html.escape(str(row['discord_token_env'] or ''))}</code></td>"
@@ -153,10 +259,11 @@ def create_admin_app(*, db: ConfigStore, gateway=None) -> FastAPI:
             )
         body = f"""
         <p>Agent profiles live in SQLite. Bot <strong>tokens</strong> stay in <code>.env</code>
-        (referenced by <code>token_env</code>).</p>
+        (referenced by <code>token_env</code>). Backend <code>openrouter</code> needs
+        <code>OPENROUTER_API_KEY</code> in <code>.env</code> (chat-only, no shell).</p>
         <table>
-          <tr><th>ID</th><th>Name</th><th>Manager</th><th>Discord</th><th>Channel</th><th>Token env</th><th>Telegram</th><th></th></tr>
-          {''.join(rows_html) or '<tr><td colspan=8><em>none</em></td></tr>'}
+          <tr><th>ID</th><th>Name</th><th>Manager</th><th>Backend</th><th>Discord</th><th>Channel</th><th>Token env</th><th>Telegram</th><th></th></tr>
+          {''.join(rows_html) or '<tr><td colspan=9><em>none</em></td></tr>'}
         </table>
         <p><a href="/agents/new">Add agent</a></p>
         """
@@ -178,7 +285,8 @@ def create_admin_app(*, db: ConfigStore, gateway=None) -> FastAPI:
           <label>ID<br><input type="text" name="id" value="{html.escape(str(r.get('id') or ''))}" required></label>
           <label>Display name<br><input type="text" name="display_name" value="{html.escape(str(r.get('display_name') or ''))}" required></label>
           <label>Workspace<br><input type="text" name="workspace" value="{html.escape(str(r.get('workspace') or '/home/maxi'))}"></label>
-          <label>Default backend<br><input type="text" name="default_backend" value="{html.escape(str(r.get('default_backend') or 'cursor-cli'))}"></label>
+          <label>Default backend (<code>cursor-cli</code> or <code>openrouter</code>)<br>
+            <input type="text" name="default_backend" value="{html.escape(str(r.get('default_backend') or 'cursor-cli'))}"></label>
           <label>Skills (one path per line)<br><textarea name="skills">{html.escape(str(skills))}</textarea></label>
           <label>System prompt file<br><input type="text" name="system_prompt_file" value="{html.escape(str(r.get('system_prompt_file') or ''))}"></label>
           <label><input type="checkbox" name="is_manager" {checked('is_manager')}> Manager</label>
@@ -260,7 +368,7 @@ def create_admin_app(*, db: ConfigStore, gateway=None) -> FastAPI:
                 f"<button type='submit'>Clear</button></form></td></tr>"
             )
         body = f"""
-        <p>Thread ↔ Cursor <code>--resume</code> session IDs (SQLite).</p>
+        <p>Thread ↔ Cursor <code>--resume</code> / OpenRouter session IDs (SQLite).</p>
         <table>
           <tr><th>Key</th><th>Title</th><th>Session</th><th></th></tr>
           {''.join(rows) or '<tr><td colspan=4><em>none</em></td></tr>'}
@@ -274,7 +382,13 @@ def create_admin_app(*, db: ConfigStore, gateway=None) -> FastAPI:
         return RedirectResponse("/sessions", status_code=303)
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    async def health() -> dict[str, Any]:
+        out: dict[str, Any] = {"status": "ok"}
+        if gateway is not None:
+            st = gateway.live_status()
+            out["running"] = st["running_count"]
+            out["queued_threads"] = st["queued_threads"]
+            out["rebuild_pending"] = st["rebuild_pending"]
+        return out
 
     return app
