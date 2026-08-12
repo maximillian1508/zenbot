@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
-from .base import AgentRunResult, ProgressCallback
+from ..util.proc import terminate_process
+from .base import AgentRunResult, ProgressCallback, RegisterProc
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,21 @@ class CursorCliBackend:
             cmd.extend(["--resume", session_id])
         return cmd
 
+    def _cancelled(
+        self,
+        *,
+        session_id: str | None,
+        cancel_event: asyncio.Event | None,
+    ) -> AgentRunResult | None:
+        if cancel_event and cancel_event.is_set():
+            return AgentRunResult(
+                text="Cancelled.",
+                session_id=session_id,
+                exit_code=130,
+                error="cancelled",
+            )
+        return None
+
     async def run(
         self,
         *,
@@ -58,6 +75,8 @@ class CursorCliBackend:
         workspace: Path,
         session_id: str | None,
         on_progress: ProgressCallback | None = None,
+        cancel_event: asyncio.Event | None = None,
+        register_proc: RegisterProc | None = None,
     ) -> AgentRunResult:
         binary = self._resolve_bin()
         if on_progress is not None:
@@ -67,12 +86,16 @@ class CursorCliBackend:
                 workspace=workspace,
                 session_id=session_id,
                 on_progress=on_progress,
+                cancel_event=cancel_event,
+                register_proc=register_proc,
             )
         return await self._run_json(
             binary=binary,
             prompt=prompt,
             workspace=workspace,
             session_id=session_id,
+            cancel_event=cancel_event,
+            register_proc=register_proc,
         )
 
     async def _run_json(
@@ -82,6 +105,8 @@ class CursorCliBackend:
         prompt: str,
         workspace: Path,
         session_id: str | None,
+        cancel_event: asyncio.Event | None = None,
+        register_proc: RegisterProc | None = None,
     ) -> AgentRunResult:
         cmd = self._base_cmd(binary, workspace, session_id)
         cmd.extend(["--output-format", "json", prompt])
@@ -92,20 +117,59 @@ class CursorCliBackend:
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workspace),
         )
+        if register_proc:
+            register_proc(proc)
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=self.config.timeout_sec,
-            )
+            comm_task = asyncio.create_task(proc.communicate())
+            if cancel_event:
+                cancel_wait = asyncio.create_task(cancel_event.wait())
+                done, pending = await asyncio.wait(
+                    {comm_task, cancel_wait},
+                    return_when=asyncio.FIRST_COMPLETED,
+                    timeout=self.config.timeout_sec,
+                )
+                if cancel_wait in done:
+                    comm_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await comm_task
+                    await terminate_process(proc)
+                    return AgentRunResult(
+                        text="Cancelled.",
+                        session_id=session_id,
+                        exit_code=130,
+                        error="cancelled",
+                    )
+                if comm_task not in done:
+                    comm_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await comm_task
+                    await terminate_process(proc)
+                    return AgentRunResult(
+                        text="Agent run timed out.",
+                        session_id=session_id,
+                        exit_code=124,
+                        error="timeout",
+                    )
+                for task in pending:
+                    task.cancel()
+                stdout, stderr = comm_task.result()
+            else:
+                stdout, stderr = await asyncio.wait_for(
+                    comm_task,
+                    timeout=self.config.timeout_sec,
+                )
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            await terminate_process(proc)
             return AgentRunResult(
                 text="Agent run timed out.",
                 session_id=session_id,
                 exit_code=124,
                 error="timeout",
             )
+
+        cancelled = self._cancelled(session_id=session_id, cancel_event=cancel_event)
+        if cancelled:
+            return cancelled
 
         return self._parse_json_output(
             stdout=stdout.decode("utf-8", errors="replace").strip(),
@@ -122,6 +186,8 @@ class CursorCliBackend:
         workspace: Path,
         session_id: str | None,
         on_progress: ProgressCallback,
+        cancel_event: asyncio.Event | None = None,
+        register_proc: RegisterProc | None = None,
     ) -> AgentRunResult:
         cmd = self._base_cmd(binary, workspace, session_id)
         cmd.extend(
@@ -139,6 +205,8 @@ class CursorCliBackend:
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workspace),
         )
+        if register_proc:
+            register_proc(proc)
         assert proc.stdout is not None
         assert proc.stderr is not None
 
@@ -147,7 +215,6 @@ class CursorCliBackend:
         new_session = session_id
         exit_code = 0
         result_text = ""
-        exit_code = 0
 
         async def drain_stderr() -> str:
             data = await proc.stderr.read()
@@ -157,15 +224,46 @@ class CursorCliBackend:
 
         try:
             while True:
-                try:
-                    line = await asyncio.wait_for(
-                        proc.stdout.readline(),
-                        timeout=self.config.timeout_sec,
+                if cancel_event and cancel_event.is_set():
+                    await terminate_process(proc)
+                    return AgentRunResult(
+                        text="Cancelled.",
+                        session_id=new_session,
+                        exit_code=130,
+                        error="cancelled",
                     )
-                except asyncio.TimeoutError:
-                    proc.kill()
-                    await proc.wait()
-                    stderr_task.cancel()
+
+                read_task = asyncio.create_task(proc.stdout.readline())
+                wait_set: set[asyncio.Task] = {read_task}
+                if cancel_event:
+                    wait_set.add(asyncio.create_task(cancel_event.wait()))
+                done, pending = await asyncio.wait(
+                    wait_set,
+                    return_when=asyncio.FIRST_COMPLETED,
+                    timeout=self.config.timeout_sec,
+                )
+                for task in pending:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+
+                if cancel_event and cancel_event.is_set():
+                    read_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await read_task
+                    await terminate_process(proc)
+                    return AgentRunResult(
+                        text="Cancelled.",
+                        session_id=new_session,
+                        exit_code=130,
+                        error="cancelled",
+                    )
+
+                if read_task not in done:
+                    read_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await read_task
+                    await terminate_process(proc)
                     return AgentRunResult(
                         text="Agent run timed out.",
                         session_id=new_session,
@@ -173,6 +271,7 @@ class CursorCliBackend:
                         error="timeout",
                     )
 
+                line = read_task.result()
                 if not line:
                     break
 
@@ -215,8 +314,11 @@ class CursorCliBackend:
             exit_code = exit_code or (proc.returncode or 0)
         finally:
             if proc.returncode is None:
-                proc.kill()
-                await proc.wait()
+                await terminate_process(proc)
+
+        cancelled = self._cancelled(session_id=new_session, cancel_event=cancel_event)
+        if cancelled:
+            return cancelled
 
         err = ""
         if not stderr_task.done():

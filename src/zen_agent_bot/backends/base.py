@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, Protocol
 
 ProgressCallback = Callable[[str], Awaitable[None]]
+RegisterProc = Callable[[asyncio.subprocess.Process], None]
 
 
 @dataclass
@@ -23,4 +25,6 @@ class AgentBackend(Protocol):
         workspace: Path,
         session_id: str | None,
         on_progress: ProgressCallback | None = None,
+        cancel_event: asyncio.Event | None = None,
+        register_proc: RegisterProc | None = None,
     ) -> AgentRunResult: ...

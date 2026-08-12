@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for zen-agent-bot rebuild requests
+After=docker.service
+
+[Path]
+PathExists=/home/maxi/apps/zen-agent-bot/data/REQUEST_REBUILD
+Unit=zenbot-rebuild.service
+
+[Install]
+WantedBy=multi-user.target

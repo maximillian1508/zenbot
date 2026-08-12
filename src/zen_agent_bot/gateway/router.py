@@ -3,14 +3,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
-from typing import Awaitable, Callable
+import time
+from collections import deque
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Awaitable, Callable
 
 from ..agents.registry import AgentRegistry
 from ..backends.base import AgentBackend
 from ..config.load import GatewayConfig
 from ..sessions import SessionStore, ThreadSession
 from ..skills.loader import build_prompt
+from ..util.proc import terminate_process
+from ..util.rebuild import request_rebuild as write_rebuild_flag, rebuild_pending
 from ..util.throttle import ThrottledProgress
 
 log = logging.getLogger(__name__)
@@ -45,10 +50,36 @@ class _QueuedJob:
 
 
 @dataclass
+class _RunHandle:
+    cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
+    proc: asyncio.subprocess.Process | None = None
+
+    def register_proc(self, proc: asyncio.subprocess.Process) -> None:
+        self.proc = proc
+
+    async def cancel(self) -> None:
+        self.cancel_event.set()
+        if self.proc is not None:
+            await terminate_process(self.proc)
+
+
+@dataclass
 class _SessionState:
     queue: asyncio.Queue[_QueuedJob | None]
     worker: asyncio.Task[None] | None = None
     busy: bool = False
+    run_handle: _RunHandle | None = None
+    current_agent_id: str | None = None
+    current_prompt: str | None = None
+    started_at: float | None = None
+
+
+@dataclass
+class _ErrorRecord:
+    at: float
+    session_key: str
+    agent_id: str
+    error: str
 
 
 class Gateway:
@@ -60,6 +91,9 @@ class Gateway:
         self._global_sem = asyncio.Semaphore(config.max_concurrent_jobs)
         self._sessions: dict[str, _SessionState] = {}
         self._sessions_guard = asyncio.Lock()
+        self._shutting_down = False
+        self._last_errors: deque[_ErrorRecord] = deque(maxlen=20)
+        self._agent_status_cache: tuple[float, str] | None = None
 
     def session_key(self, agent_id: str, transport: str, channel_id: str | int) -> str:
         return f"{agent_id}:{transport}:{channel_id}"
@@ -113,6 +147,10 @@ class Gateway:
         send: SendText,
         edit_status: EditText,
     ) -> JobResult:
+        if self._shutting_down:
+            await edit_status("⚠️ Gateway is shutting down — try again after restart.")
+            return JobResult(text="", exit_code=0, session_id=None)
+
         state = await self._ensure_session_worker(session_key)
         ahead = state.queue.qsize() + (1 if state.busy else 0)
         job = _QueuedJob(
@@ -134,6 +172,44 @@ class Gateway:
 
         return JobResult(text="", exit_code=0, session_id=None)
 
+    async def cancel_session(self, session_key: str) -> bool:
+        state = self._sessions.get(session_key)
+        if state is None or not state.busy or state.run_handle is None:
+            return False
+        await state.run_handle.cancel()
+        return True
+
+    async def shutdown(self, grace_sec: float = 180.0) -> None:
+        self._shutting_down = True
+        log.info("Gateway shutdown started (grace=%ss)", grace_sec)
+        deadline = time.monotonic() + grace_sec
+
+        while time.monotonic() < deadline:
+            busy = any(s.busy for s in self._sessions.values())
+            if not busy:
+                break
+            await asyncio.sleep(0.25)
+
+        busy_keys = [k for k, s in self._sessions.items() if s.busy]
+        if busy_keys:
+            log.warning("Grace expired — cancelling %d running job(s)", len(busy_keys))
+            for key in busy_keys:
+                state = self._sessions[key]
+                if state.run_handle is not None:
+                    await state.run_handle.cancel()
+
+            cancel_deadline = time.monotonic() + 10.0
+            while time.monotonic() < cancel_deadline:
+                if not any(s.busy for s in self._sessions.values()):
+                    break
+                await asyncio.sleep(0.25)
+
+        for state in self._sessions.values():
+            if state.worker is not None and not state.worker.done():
+                await state.queue.put(None)
+
+        log.info("Gateway shutdown complete")
+
     async def _session_worker(self, session_key: str) -> None:
         state = self._sessions[session_key]
         while True:
@@ -141,20 +217,46 @@ class Gateway:
             if job is None:
                 state.queue.task_done()
                 break
+            if self._shutting_down:
+                state.queue.task_done()
+                try:
+                    await job.edit_status("⚠️ Skipped — gateway shutting down.")
+                except Exception:
+                    log.exception("Failed to update status for %s", session_key)
+                continue
             state.busy = True
+            state.current_agent_id = job.agent_id
+            state.current_prompt = job.user_prompt
+            state.started_at = time.time()
             try:
-                await self._execute_job(job)
-            except Exception:
+                result = await self._execute_job(job)
+                if result.error and result.error != "cancelled":
+                    self._record_error(
+                        session_key=job.session_key,
+                        agent_id=job.agent_id,
+                        error=result.error,
+                    )
+            except Exception as exc:
                 log.exception("Unhandled error running job for %s", session_key)
+                self._record_error(
+                    session_key=job.session_key,
+                    agent_id=job.agent_id,
+                    error=str(exc),
+                )
                 try:
                     await job.edit_status("❌ Internal error — check logs.")
                 except Exception:
                     log.exception("Failed to update status for %s", session_key)
             finally:
                 state.busy = False
+                state.run_handle = None
+                state.current_agent_id = None
+                state.current_prompt = None
+                state.started_at = None
                 state.queue.task_done()
 
     async def _execute_job(self, job: _QueuedJob) -> JobResult:
+        state = self._sessions[job.session_key]
         await job.edit_status("⏳ Agent running…")
 
         profile = self.agents.get(job.agent_id)
@@ -169,6 +271,9 @@ class Gateway:
             user_message=job.user_prompt,
         )
 
+        run_handle = _RunHandle()
+        state.run_handle = run_handle
+
         async with self._global_sem:
             progress = (
                 ThrottledProgress(job.edit_status)
@@ -181,6 +286,8 @@ class Gateway:
                     workspace=profile.workspace,
                     session_id=sess.session_id,
                     on_progress=progress.push if progress else None,
+                    cancel_event=run_handle.cancel_event,
+                    register_proc=run_handle.register_proc,
                 )
             except Exception as exc:
                 log.exception("Agent run failed for %s", job.agent_id)
@@ -194,6 +301,21 @@ class Gateway:
             finally:
                 if progress:
                     await progress.flush()
+
+        if result.error == "cancelled":
+            await job.edit_status(f"🛑 **Cancelled** · {profile.display_name}")
+            if result.session_id:
+                title = sess.title or title_from_prompt(job.user_prompt)
+                self.store.set(
+                    job.session_key,
+                    ThreadSession(session_id=result.session_id, title=title),
+                )
+            return JobResult(
+                text=result.text,
+                exit_code=result.exit_code,
+                session_id=result.session_id,
+                error=result.error,
+            )
 
         prefix = "✅" if result.exit_code == 0 else "⚠️"
         header = f"{prefix} **{profile.display_name}**"
@@ -231,3 +353,106 @@ class Gateway:
     def set_session_title(self, session_key: str, title: str) -> None:
         sess = self.store.get(session_key)
         self.store.set(session_key, ThreadSession(session_id=sess.session_id, title=title))
+
+    def request_rebuild(self, *, reason: str = "") -> Path:
+        """Ask the host systemd watcher to rebuild this stack (data/REQUEST_REBUILD)."""
+        return write_rebuild_flag(self.config.data_dir, reason=reason)
+
+    def rebuild_pending(self) -> bool:
+        return rebuild_pending(self.config.data_dir)
+
+    def _record_error(self, *, session_key: str, agent_id: str, error: str) -> None:
+        self._last_errors.appendleft(
+            _ErrorRecord(
+                at=time.time(),
+                session_key=session_key,
+                agent_id=agent_id,
+                error=error[:500],
+            )
+        )
+
+    async def cursor_agent_status(self, *, force: bool = False) -> str:
+        """Best-effort `agent status` (cached ~30s)."""
+        now = time.monotonic()
+        if (
+            not force
+            and self._agent_status_cache is not None
+            and now - self._agent_status_cache[0] < 30
+        ):
+            return self._agent_status_cache[1]
+
+        cmd = "agent"
+        for name, backend in self.backends.items():
+            cfg = getattr(backend, "config", None)
+            if name == "cursor-cli" or getattr(cfg, "command", None):
+                if getattr(cfg, "command", None):
+                    cmd = str(cfg.command)
+                break
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                cmd,
+                "status",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=8)
+            text = stdout.decode("utf-8", errors="replace").strip() or "(empty)"
+            if proc.returncode not in (0, None):
+                text = f"(exit {proc.returncode}) {text}"
+        except FileNotFoundError:
+            text = f"Binary not found: {cmd}"
+        except asyncio.TimeoutError:
+            text = "Timed out running `agent status`"
+        except Exception as exc:
+            text = f"Error: {exc}"
+
+        self._agent_status_cache = (now, text)
+        return text
+
+    def live_status(self) -> dict[str, Any]:
+        running: list[dict[str, Any]] = []
+        queued: list[dict[str, Any]] = []
+        for key, state in self._sessions.items():
+            qsize = state.queue.qsize()
+            if state.busy:
+                started = state.started_at or time.time()
+                running.append(
+                    {
+                        "session_key": key,
+                        "agent_id": state.current_agent_id or "?",
+                        "started_at": started,
+                        "elapsed_sec": round(time.time() - started, 1),
+                        "prompt_preview": title_from_prompt(state.current_prompt or ""),
+                        "queue_behind": qsize,
+                        "pid": (
+                            state.run_handle.proc.pid
+                            if state.run_handle and state.run_handle.proc
+                            else None
+                        ),
+                    }
+                )
+            elif qsize > 0:
+                queued.append({"session_key": key, "queued": qsize})
+
+        errors = [
+            {
+                "at": e.at,
+                "session_key": e.session_key,
+                "agent_id": e.agent_id,
+                "error": e.error,
+            }
+            for e in self._last_errors
+        ]
+        return {
+            "shutting_down": self._shutting_down,
+            "rebuild_pending": self.rebuild_pending(),
+            "max_concurrent_jobs": self.config.max_concurrent_jobs,
+            "running_count": len(running),
+            "queued_threads": len(queued),
+            "running": running,
+            "queued": queued,
+            "last_errors": errors,
+            "backends": sorted(self.backends.keys()),
+            "streaming_enabled": self.config.streaming_enabled,
+        }

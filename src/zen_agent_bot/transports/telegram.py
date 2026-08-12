@@ -37,8 +37,10 @@ class TelegramAgentApp:
         app = Application.builder().token(self.binding.token).build()
         app.add_handler(CommandHandler("new", self.cmd_new))
         app.add_handler(CommandHandler("status", self.cmd_status))
+        app.add_handler(CommandHandler("cancel", self.cmd_cancel))
         if self.profile.is_manager:
             app.add_handler(CommandHandler("agents", self.cmd_agents))
+            app.add_handler(CommandHandler("rebuild", self.cmd_rebuild))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_message))
         return app
 
@@ -77,6 +79,18 @@ class TelegramAgentApp:
             msg = "No session yet."
         await update.message.reply_text(msg, parse_mode="Markdown")
 
+    async def cmd_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.effective_chat or not update.message:
+            return
+        if not self.gateway.is_allowed(update.effective_user.id):
+            await update.message.reply_text("Not authorized.")
+            return
+        key = self._session_key(update.effective_chat.id, update.message.message_thread_id)
+        if await self.gateway.cancel_session(key):
+            await update.message.reply_text("Cancelling the running job…")
+        else:
+            await update.message.reply_text("Nothing running in this thread.")
+
     async def cmd_agents(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
             return
@@ -84,6 +98,22 @@ class TelegramAgentApp:
             await update.message.reply_text("Not authorized.")
             return
         await update.message.reply_text(self.gateway.list_agents_markdown())
+
+    async def cmd_rebuild(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.message:
+            return
+        if not self.gateway.is_allowed(update.effective_user.id):
+            await update.message.reply_text("Not authorized.")
+            return
+        if self.gateway.rebuild_pending():
+            await update.message.reply_text("Rebuild already requested — waiting for host.")
+            return
+        self.gateway.request_rebuild(
+            reason=f"telegram:/rebuild by {update.effective_user.id}"
+        )
+        await update.message.reply_text(
+            "Rebuild requested. Host will recreate in ~15s. Ping after /health is OK."
+        )
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.effective_chat or not update.message:
@@ -134,7 +164,11 @@ class TelegramAgentApp:
         )
 
 
-async def run_telegram_bots(gateway: Gateway) -> None:
+async def run_telegram_bots(
+    gateway: Gateway,
+    *,
+    apps_out: list[Application] | None = None,
+) -> None:
     profiles = gateway.agents.telegram_agents()
     if not profiles:
         log.info("No Telegram agents configured")
@@ -148,6 +182,8 @@ async def run_telegram_bots(gateway: Gateway) -> None:
         await app.start()
         await app.updater.start_polling(drop_pending_updates=True)  # type: ignore[union-attr]
         apps.append(app)
+        if apps_out is not None:
+            apps_out.append(app)
         log.info("Telegram polling started for %s", profile.display_name)
 
     try:

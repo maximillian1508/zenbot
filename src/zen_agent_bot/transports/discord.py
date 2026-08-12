@@ -102,6 +102,30 @@ class AgentDiscordBot(discord.Client):
                 msg = "No session yet — next message starts a new agent run."
             await interaction.response.send_message(msg, ephemeral=True)
 
+        @self.tree.command(
+            name="cancel",
+            description="Cancel the in-flight agent job in this thread",
+        )
+        async def cmd_cancel(interaction: discord.Interaction) -> None:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                await interaction.response.send_message("Not authorized.", ephemeral=True)
+                return
+            channel = interaction.channel
+            if channel is None:
+                await interaction.response.send_message("No channel.", ephemeral=True)
+                return
+            key = self.gateway.session_key(agent_id, "discord", thread_key(channel))
+            if await self.gateway.cancel_session(key):
+                await interaction.response.send_message(
+                    "Cancelling the running job…",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.send_message(
+                    "Nothing running in this thread.",
+                    ephemeral=True,
+                )
+
         if is_manager:
 
             @self.tree.command(name="agents", description="List configured agent profiles")
@@ -112,6 +136,28 @@ class AgentDiscordBot(discord.Client):
                 await interaction.response.send_message(
                     self.gateway.list_agents_markdown(),
                     ephemeral=True,
+                )
+
+            @self.tree.command(
+                name="rebuild",
+                description="Request host rebuild of zen-agent-bot (manager only)",
+            )
+            async def cmd_rebuild(interaction: discord.Interaction) -> None:
+                if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                    await interaction.response.send_message("Not authorized.", ephemeral=True)
+                    return
+                if self.gateway.rebuild_pending():
+                    await interaction.response.send_message(
+                        "Rebuild already requested — waiting for host watcher.",
+                        ephemeral=True,
+                    )
+                    return
+                path = self.gateway.request_rebuild(
+                    reason=f"discord:/rebuild by {interaction.user.id}"
+                )
+                await interaction.response.send_message(
+                    "Rebuild requested. Host will build + recreate in ~15s "
+                    f"(flag `{path.name}`). Ping this thread after `/health` is OK."
                 )
 
         guild = discord.Object(id=self.guild_id) if self.guild_id else None
@@ -187,7 +233,11 @@ class AgentDiscordBot(discord.Client):
         )
 
 
-async def run_discord_bots(gateway: Gateway) -> None:
+async def run_discord_bots(
+    gateway: Gateway,
+    *,
+    clients_out: list[AgentDiscordBot] | None = None,
+) -> None:
     profiles = gateway.agents.discord_agents()
     if not profiles:
         log.warning("No Discord agents configured")
@@ -198,6 +248,8 @@ async def run_discord_bots(gateway: Gateway) -> None:
         assert profile.discord is not None
         guild_id = profile.discord.guild_id or gateway.config.discord_guild_id
         bot = AgentDiscordBot(gateway=gateway, profile=profile, guild_id=guild_id)
+        if clients_out is not None:
+            clients_out.append(bot)
 
         async def _run(client: AgentDiscordBot = bot, token: str = profile.discord.token) -> None:
             await client.start(token)

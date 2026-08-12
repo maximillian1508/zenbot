@@ -5,6 +5,7 @@ services:
     container_name: ${CONTAINER_NAME:-zen-agent-bot}
     restart: unless-stopped
     init: true
+    stop_grace_period: 190s
     env_file:
       - .env
     environment:

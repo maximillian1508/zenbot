@@ -55,7 +55,8 @@ def require_auth(
         )
 
 
-def create_admin_app(*, db: ConfigStore) -> FastAPI:
+def create_admin_app(*, db: ConfigStore, gateway=None) -> FastAPI:
+    _ = gateway
     app = FastAPI(title="zen-agent-bot admin", docs_url=None, redoc_url=None)
 
     def page(title: str, body: str, msg: str = "") -> HTMLResponse:
