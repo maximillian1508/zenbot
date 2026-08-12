@@ -27,7 +27,9 @@ agents:
     workspace: /home/you
     default_backend: cursor-cli
     system_prompt_file: agents/manager/SOUL.md
-    skills: []
+    skills:
+      - ~/.cursor/skills-cursor/create-skill/SKILL.md
+      - ~/apps/zen-agent-bot/skills/zen-agent-bot-dev/SKILL.md
     discord:
       enabled: true
       token_env: DISCORD_TOKEN_MANAGER
