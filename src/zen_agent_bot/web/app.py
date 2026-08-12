@@ -119,7 +119,7 @@ nav a.active {
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--surface); box-shadow: var(--shadow); margin: 0.75rem 0 1.25rem;
 }
-table { border-collapse: collapse; width: 100%; min-width: 480px; }
+table { border-collapse: collapse; width: 100%; min-width: 0; }
 th, td {
   border-bottom: 1px solid var(--border); padding: 0.55rem 0.7rem;
   text-align: left; vertical-align: top; font-size: 0.92rem;
@@ -224,6 +224,7 @@ body.settings-open .settings-panel { transform: translateX(0); }
 @media (min-width: 701px) {
   .mobile-only { display: none !important; }
   .header-actions { justify-content: flex-end; flex: 1 1 auto; }
+  table { min-width: 420px; }
 }
 """
 
