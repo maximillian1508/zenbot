@@ -8,11 +8,16 @@ import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from pathlib import Path
+
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 
 from ..store import ConfigStore
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 if TYPE_CHECKING:
     from ..gateway import Gateway
@@ -158,6 +163,37 @@ button:hover, .btn:hover { filter: brightness(0.97); }
 .job-card .meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem; }
 .section { margin: 1.5rem 0 0.5rem; font-size: 1.05rem; }
 .hint { color: var(--muted); font-size: 0.9rem; margin: 0.35rem 0 1rem; }
+.header-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.4rem; height: 2.4rem; padding: 0; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  cursor: pointer; box-shadow: var(--shadow);
+}
+.icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+.icon-btn svg { width: 1.15rem; height: 1.15rem; display: block; }
+.settings-backdrop {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, 0.35);
+  opacity: 0; pointer-events: none; transition: opacity 0.2s ease; z-index: 40;
+}
+.settings-panel {
+  position: fixed; top: 0; right: 0; height: 100%; width: min(26rem, 100%);
+  background: var(--surface); border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(16, 24, 40, 0.12);
+  transform: translateX(100%); transition: transform 0.22s ease;
+  z-index: 50; display: flex; flex-direction: column;
+}
+body.settings-open { overflow: hidden; }
+body.settings-open .settings-backdrop { opacity: 1; pointer-events: auto; }
+body.settings-open .settings-panel { transform: translateX(0); }
+.settings-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.75rem; padding: 1rem 1.1rem; border-bottom: 1px solid var(--border);
+}
+.settings-head h2 { margin: 0; font-size: 1.1rem; }
+.settings-body { padding: 1rem 1.1rem 2rem; overflow-y: auto; flex: 1; }
+.settings-body .section { margin-top: 1.25rem; }
+.settings-body label input[type=checkbox] { width: auto; margin-right: 0.45rem; }
 @media (max-width: 700px) {
   .wrap { padding: 0.85rem 0.85rem 2rem; }
   input[type=text], textarea { max-width: none; }
@@ -208,8 +244,113 @@ def _short_key(key: str, keep: int = 28) -> str:
     return key[: keep - 1] + "…"
 
 
+def _truthy_setting(raw: str | None, default: bool = True) -> bool:
+    if raw is None:
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
 def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> FastAPI:
     app = FastAPI(title="zen-agent-bot admin", docs_url=None, redoc_url=None)
+    if STATIC_DIR.is_dir():
+        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    def _settings_panel(*, open_on_load: bool = False) -> str:
+        streaming = _truthy_setting(db.get_setting("streaming_enabled"), True)
+        if gateway is not None:
+            streaming = gateway.config.streaming_enabled
+        max_jobs = db.get_setting("max_concurrent_jobs", "2") or "2"
+        if gateway is not None:
+            max_jobs = str(gateway.config.max_concurrent_jobs)
+        guild = (
+            os.environ.get("DISCORD_GUILD_ID")
+            or db.get_setting("discord_guild_id")
+            or ""
+        ).strip()
+        pw = _admin_password()
+        auth_html = (
+            '<div class="callout">Auth protected (<code>ADMIN_PASSWORD</code> set).</div>'
+            if pw
+            else (
+                '<div class="callout warn">No <code>ADMIN_PASSWORD</code> — set one in '
+                "<code>.env</code> then restart.</div>"
+            )
+        )
+        streaming_checked = "checked" if streaming else ""
+        open_script = (
+            "document.body.classList.add('settings-open');" if open_on_load else ""
+        )
+        return f"""
+  <div class="settings-backdrop" id="settings-backdrop" hidden></div>
+  <aside class="settings-panel" id="settings-panel" aria-hidden="true" aria-label="Settings">
+    <div class="settings-head">
+      <h2>Settings</h2>
+      <button type="button" class="icon-btn" id="settings-close" aria-label="Close settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="settings-body">
+      <h3 class="section">Gateway</h3>
+      <p class="hint">Saved to SQLite. Streaming applies live; concurrent jobs &amp; guild need a restart.</p>
+      <form method="post" action="/settings/save">
+        <label><input type="checkbox" name="streaming_enabled" {streaming_checked}> Discord/Telegram streaming status edits</label>
+        <label>Max concurrent jobs
+          <input type="text" name="max_concurrent_jobs" value="{html.escape(max_jobs)}" inputmode="numeric" pattern="[0-9]+" required>
+        </label>
+        <label>Discord guild ID (slash sync)
+          <input type="text" name="discord_guild_id" value="{html.escape(guild)}" inputmode="numeric" pattern="[0-9]*" placeholder="optional">
+        </label>
+        <p><button type="submit">Save settings</button></p>
+      </form>
+
+      <h3 class="section">Security</h3>
+      {auth_html}
+
+      <h3 class="section">Runtime</h3>
+      <p class="hint">DB <code>{html.escape(str(db.path))}</code></p>
+      <div class="callout">
+        <strong>Live vs restart</strong><br>
+        Allowlist and session clears apply immediately.
+        New bots / token or channel changes need a host restart
+        (<code>systemctl restart zen-agent-bot</code> or Discord <code>/rebuild</code>).
+      </div>
+      <div class="callout">
+        <strong>Install app</strong><br>
+        On mobile, use the browser “Add to Home Screen” / Install for the Zen Agents PWA.
+      </div>
+    </div>
+  </aside>
+  <script>
+    (function () {{
+      var backdrop = document.getElementById("settings-backdrop");
+      var panel = document.getElementById("settings-panel");
+      var openBtn = document.getElementById("settings-open");
+      var closeBtn = document.getElementById("settings-close");
+      function openSettings() {{
+        document.body.classList.add("settings-open");
+        backdrop.hidden = false;
+        panel.setAttribute("aria-hidden", "false");
+      }}
+      function closeSettings() {{
+        document.body.classList.remove("settings-open");
+        backdrop.hidden = true;
+        panel.setAttribute("aria-hidden", "true");
+      }}
+      if (openBtn) openBtn.addEventListener("click", openSettings);
+      if (closeBtn) closeBtn.addEventListener("click", closeSettings);
+      if (backdrop) backdrop.addEventListener("click", closeSettings);
+      document.addEventListener("keydown", function (e) {{
+        if (e.key === "Escape") closeSettings();
+      }});
+      {open_script}
+      if ("serviceWorker" in navigator) {{
+        navigator.serviceWorker.register("/static/sw.js").catch(function () {{}});
+      }}
+    }})();
+  </script>
+"""
 
     def page(
         title: str,
@@ -219,6 +360,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         active: str = "",
         refresh: int | None = None,
         banner_class: str = "",
+        open_settings: bool = False,
     ) -> HTMLResponse:
         links = [
             ("/", "Dashboard", "dashboard"),
@@ -237,11 +379,19 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             cls = f"msg {banner_class}".strip()
             banner = f'<div class="{cls}">{msg}</div>'
         meta_refresh = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
+        settings = _settings_panel(open_on_load=open_settings)
         html_out = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Zen Agents">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="icon" href="/static/icon-192.png" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
   {meta_refresh}
   <title>{html.escape(title)} · Zen Agents</title>
   <style>{BASE_STYLE}</style>
@@ -253,12 +403,21 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         <h1>Zen Agents</h1>
         <p>Gateway admin · Discord / Telegram</p>
       </div>
-      {nav}
+      <div class="header-actions">
+        {nav}
+        <button type="button" class="icon-btn" id="settings-open" aria-label="Open settings" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/>
+          </svg>
+        </button>
+      </div>
     </header>
     {banner}
     <h2 class="page-title">{html.escape(title)}</h2>
     {body}
   </div>
+  {settings}
 </body>
 </html>"""
         return HTMLResponse(html_out)
@@ -294,6 +453,10 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             msg = auth_banner[0]
             banner_class = auth_banner[1]
 
+        open_settings = request.query_params.get("settings") == "1"
+        if request.query_params.get("saved") == "settings":
+            msg = "Settings saved."
+            open_settings = True
         body = f"""
         <div class="cards">
           <div class="card"><span class="label">Agents</span>
@@ -309,15 +472,42 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
           <div class="card"><span class="label">Telegram-ready</span>
             <div class="value">{tg_ready}</div></div>
         </div>
-        <p class="hint">DB <code>{html.escape(str(db.path))}</code></p>
-        <div class="callout">
-          <strong>Live vs restart</strong><br>
-          Allowlist and session clears apply immediately.
-          New bots / token or channel changes need a host restart
-          (<code>systemctl restart zen-agent-bot</code> or Discord <code>/rebuild</code>).
-        </div>
+        <p class="hint">Use the gear button for gateway settings, auth, and restart notes.</p>
         """
-        return page("Dashboard", body, msg, active="dashboard", banner_class=banner_class)
+        return page(
+            "Dashboard",
+            body,
+            msg,
+            active="dashboard",
+            banner_class=banner_class,
+            open_settings=open_settings,
+        )
+
+    @app.post("/settings/save")
+    async def settings_save(
+        streaming_enabled: str | None = Form(None),
+        max_concurrent_jobs: str = Form("2"),
+        discord_guild_id: str = Form(""),
+        _: None = Depends(require_auth),
+    ) -> RedirectResponse:
+        jobs_raw = max_concurrent_jobs.strip() or "2"
+        try:
+            jobs = max(1, int(jobs_raw))
+        except ValueError as exc:
+            raise HTTPException(400, "max_concurrent_jobs must be an integer") from exc
+        stream_on = streaming_enabled is not None
+        db.set_setting("streaming_enabled", "true" if stream_on else "false")
+        db.set_setting("max_concurrent_jobs", str(jobs))
+        guild = discord_guild_id.strip()
+        if guild:
+            if not guild.isdigit():
+                raise HTTPException(400, "discord_guild_id must be numeric")
+            db.set_setting("discord_guild_id", guild)
+        else:
+            db.set_setting("discord_guild_id", "")
+        if gateway is not None:
+            gateway.config.streaming_enabled = stream_on
+        return RedirectResponse("/?saved=settings", status_code=303)
 
     @app.get("/status", response_class=HTMLResponse)
     async def status_page(_: None = Depends(require_auth)) -> HTMLResponse:
