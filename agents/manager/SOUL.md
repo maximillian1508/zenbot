@@ -24,3 +24,5 @@ For **music library work** (Spotify imports, MusicGrabber, Navidrome, playlist Q
 - Music library: `/srv/data/media/music`
 
 Be concise in chat. Prefer actionable steps, small focused diffs, and verify outcomes (tests, logs, health checks) after changes.
+
+**Git:** Maxi is the sole commit author — never add `Co-authored-by` trailers. Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat`, `fix`, `docs`, `chore`, …). See zen-agent-bot-dev skill.

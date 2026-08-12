@@ -81,13 +81,71 @@ Container needs host mounts: `~/.local/share/cursor-agent`, `agent` binary, `~/.
 | Admin UI | `src/zen_agent_bot/web/app.py` |
 | Prompt build | `src/zen_agent_bot/skills/loader.py` |
 
+## Git commits (mandatory)
+
+**Maxi is the only author — always.** No exceptions.
+
+- **Never** add `Co-authored-by:` (or any other co-author trailer) to commit messages — not for Cursor, not for AI, not for any tool or hook reason.
+- Commits must show **only** `maximillian1508 <maximillian1508@gmail.com>` as author and committer.
+- **Do not commit or push** unless the user explicitly asks.
+- Never commit: `.env`, `data/gateway.db`, `data/config.yaml`, tokens, or real Discord/Telegram IDs.
+
+### Conventional Commits
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) for every message:
+
+```text
+<type>[optional scope]: <short description>
+
+[optional body]
+
+[optional footer]
+```
+
+**Types** (use the most accurate one):
+
+| Type | When |
+|------|------|
+| `feat` | New feature or user-facing capability |
+| `fix` | Bug fix |
+| `docs` | README, skills, comments only |
+| `refactor` | Code change that neither fixes nor adds feature |
+| `test` | Tests only |
+| `chore` | Deps, CI, tooling, gitignore |
+| `perf` | Performance improvement |
+| `build` | Docker, compose, packaging |
+
+**Examples:**
+
+```text
+feat(gateway): add /cancel for in-flight agent jobs
+fix(discord): show queued status when thread is busy
+docs: update deploy steps in README
+chore(deps): bump fastapi to 0.141.1
+```
+
+Rules:
+
+- Subject line: imperative mood, lowercase after the colon, no period, ~72 chars max
+- Scope is optional but preferred when touching one area (`gateway`, `discord`, `admin`, `docker`, `store`)
+- One logical change per commit when possible
+- Body only when the *why* isn’t obvious from the subject
+
+If `git commit` injects a co-author trailer (IDE/hook behavior), rewrite the commit without it:
+
+```bash
+# write message to a file (no co-author lines), then:
+git commit-tree HEAD^{tree} -p HEAD^ -F /path/to/message.txt
+git reset --hard <new-sha>
+```
+
+Or amend with `-F message.txt` and verify with `git log -1` before push.
+
 ## Conventions
 
 - Python 3.12 + uv; asyncio single process
 - Minimize diff scope; match existing style
-- Don't commit `.env`, `data/gateway.db`, `data/config.yaml`
 - Admin edits to allowlist apply live; **new bots / token changes need container restart**
-- Sole author commits — no `Co-authored-by` trailers
 
 ## Backlog (prioritized — pick from ROADMAP/FEATURES)
 
