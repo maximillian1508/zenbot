@@ -8,6 +8,19 @@ from typing import Awaitable, Callable, Protocol
 ProgressCallback = Callable[[str], Awaitable[None]]
 RegisterProc = Callable[[asyncio.subprocess.Process], None]
 
+# Cursor/Claude stream-json can emit huge single-line events (tool payloads).
+# asyncio StreamReader defaults to 64 KiB and raises LimitOverrunError.
+STREAM_STDOUT_LIMIT = 8 * 1024 * 1024
+
+
+def is_stream_line_too_large(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return (
+        isinstance(exc, asyncio.LimitOverrunError)
+        or "chunk is longer than limit" in msg
+        or "separator is found" in msg
+    )
+
 
 @dataclass
 class AgentRunResult:

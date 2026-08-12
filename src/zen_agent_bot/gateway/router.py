@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ..agents.registry import AgentRegistry
-from ..backends.base import AgentBackend
+from ..backends.base import AgentBackend, is_stream_line_too_large
 from ..config.load import GatewayConfig
 from ..sessions import SessionStore, ThreadSession
 from ..skills.loader import build_prompt
@@ -65,6 +65,39 @@ class _RunHandle:
             await terminate_process(self.proc)
 
 
+def _status_with_footer(
+    *,
+    existing: str,
+    emoji: str,
+    title: str,
+    display_name: str,
+    reason: str,
+    limit: int = 2000,
+) -> str:
+    """Keep streamed/partial text and append an outcome note (do not wipe)."""
+    footer = f"\n\n———\n{emoji} **{title}** · {display_name}\n_{reason}_"
+    body = (existing or "").strip()
+    placeholders = {
+        "Cancelled.",
+        "Agent run timed out.",
+        "Claude Code run timed out.",
+        "(interrupted)",
+        "⏳ Agent running…",
+        "⏳ **Agent running…**",
+        "⏳ **Claude Code…**",
+    }
+    if not body or body in placeholders:
+        bare = f"{emoji} **{title}** · {display_name}\n_{reason}_"
+        return bare[:limit]
+
+    room = limit - len(footer)
+    if room < 80:
+        return f"{emoji} **{title}** · {display_name}\n_{reason}_"[:limit]
+    if len(body) > room:
+        body = body[: room - 20].rstrip() + "\n\n_(truncated)_"
+    return body + footer
+
+
 def _cancelled_status_message(
     *,
     existing: str,
@@ -72,19 +105,35 @@ def _cancelled_status_message(
     reason: str,
     limit: int = 2000,
 ) -> str:
-    """Keep streamed/partial text and append a cancel note (do not wipe)."""
-    footer = f"\n\n———\n🛑 **Cancelled** · {display_name}\n_{reason}_"
-    body = (existing or "").strip()
-    if not body or body in ("Cancelled.", "Agent run timed out.", "⏳ Agent running…"):
-        bare = f"🛑 **Cancelled** · {display_name}\n_{reason}_"
-        return bare[:limit]
+    return _status_with_footer(
+        existing=existing,
+        emoji="🛑",
+        title="Cancelled",
+        display_name=display_name,
+        reason=reason,
+        limit=limit,
+    )
 
-    room = limit - len(footer)
-    if room < 80:
-        return f"🛑 **Cancelled** · {display_name}\n_{reason}_"[:limit]
-    if len(body) > room:
-        body = body[: room - 20].rstrip() + "\n\n_(truncated)_"
-    return body + footer
+
+def _friendly_failure_reason(exc: BaseException) -> str:
+    if is_stream_line_too_large(exc):
+        return (
+            "stream line too large for the gateway reader "
+            "(huge Cursor NDJSON event). Retry this follow-up."
+        )
+    msg = str(exc).strip() or type(exc).__name__
+    return msg[:280]
+
+
+def _interrupt_reason(error: str | None) -> str | None:
+    if error == "stream_line_too_large":
+        return (
+            "stream line too large for the gateway reader "
+            "(huge Cursor NDJSON event). Retry this follow-up."
+        )
+    if error == "timeout":
+        return "agent run timed out"
+    return None
 
 
 @dataclass
@@ -318,7 +367,18 @@ class Gateway:
                 )
             except Exception as exc:
                 log.exception("Agent run failed for %s", job.agent_id)
-                await job.edit_status(f"❌ Failed to start agent: {exc}")
+                existing = ""
+                if progress and progress.latest.strip():
+                    existing = progress.latest
+                await job.edit_status(
+                    _status_with_footer(
+                        existing=existing,
+                        emoji="❌",
+                        title="Interrupted",
+                        display_name=profile.display_name,
+                        reason=_friendly_failure_reason(exc),
+                    )
+                )
                 return JobResult(
                     text=str(exc),
                     exit_code=1,
@@ -341,6 +401,39 @@ class Gateway:
                     existing=existing,
                     display_name=profile.display_name,
                     reason=run_handle.cancel_reason,
+                )
+            )
+            if result.session_id:
+                title = sess.title or title_from_prompt(job.user_prompt)
+                self.store.set(
+                    job.session_key,
+                    ThreadSession(session_id=result.session_id, title=title),
+                )
+            return JobResult(
+                text=result.text,
+                exit_code=result.exit_code,
+                session_id=result.session_id,
+                error=result.error,
+            )
+
+        interrupt_reason = _interrupt_reason(result.error)
+        if interrupt_reason:
+            existing = ""
+            if progress and progress.latest.strip():
+                existing = progress.latest
+            elif (result.text or "").strip() not in {
+                "Agent run timed out.",
+                "Claude Code run timed out.",
+                "(interrupted)",
+            }:
+                existing = (result.text or "").strip()
+            await job.edit_status(
+                _status_with_footer(
+                    existing=existing,
+                    emoji="⚠️",
+                    title="Interrupted",
+                    display_name=profile.display_name,
+                    reason=interrupt_reason,
                 )
             )
             if result.session_id:

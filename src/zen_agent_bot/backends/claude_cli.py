@@ -8,7 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..util.proc import terminate_process
-from .base import AgentRunResult, ProgressCallback, RegisterProc
+from .base import (
+    STREAM_STDOUT_LIMIT,
+    AgentRunResult,
+    ProgressCallback,
+    RegisterProc,
+    is_stream_line_too_large,
+)
 
 
 @dataclass(frozen=True)
@@ -126,6 +132,7 @@ class ClaudeCliBackend:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workspace),
+            limit=STREAM_STDOUT_LIMIT,
         )
         if register_proc:
             register_proc(proc)
@@ -215,6 +222,7 @@ class ClaudeCliBackend:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workspace),
+            limit=STREAM_STDOUT_LIMIT,
         )
         if register_proc:
             register_proc(proc)
@@ -282,7 +290,18 @@ class ClaudeCliBackend:
                         error="timeout",
                     )
 
-                line = read_task.result()
+                try:
+                    line = read_task.result()
+                except (asyncio.LimitOverrunError, ValueError) as exc:
+                    if not is_stream_line_too_large(exc):
+                        raise
+                    await terminate_process(proc)
+                    return AgentRunResult(
+                        text=assistant_text or result_text or "(interrupted)",
+                        session_id=new_session,
+                        exit_code=1,
+                        error="stream_line_too_large",
+                    )
                 if not line:
                     break
 
