@@ -1,0 +1,30 @@
+[Unit]
+Description=zen-agent-bot gateway (Discord/Telegram → Cursor Agent)
+Documentation=https://github.com/maximillian1508/zenbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=maxi
+Group=maxi
+WorkingDirectory=/home/maxi/apps/zen-agent-bot
+Environment=HOME=/home/maxi
+Environment=PATH=/home/maxi/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/home/maxi/apps/zen-agent-bot/.env
+# Prefer absolute data paths on host
+Environment=ZEN_AGENT_DATA_DIR=/home/maxi/apps/zen-agent-bot/data
+Environment=AGENT_WORKSPACE=/home/maxi
+ExecStart=/home/maxi/.local/bin/uv run --directory /home/maxi/apps/zen-agent-bot zen-agent-bot
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=190
+KillMode=mixed
+# Soft memory guard (matches former compose limit intent)
+MemoryMax=2G
+
+# Agent needs to reach Discord, OpenRouter, Cursor, local APIs
+# No NewNetwork — keep host networking for simplicity
+
+[Install]
+WantedBy=multi-user.target

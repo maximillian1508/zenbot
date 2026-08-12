@@ -156,7 +156,7 @@ class AgentDiscordBot(discord.Client):
                     reason=f"discord:/rebuild by {interaction.user.id}"
                 )
                 await interaction.response.send_message(
-                    "Rebuild requested. Host will build + recreate in ~15s "
+                    "Restart requested. Host will `systemctl restart` in ~15s "
                     f"(flag `{path.name}`). Ping this thread after `/health` is OK."
                 )
 

@@ -112,7 +112,7 @@ class TelegramAgentApp:
             reason=f"telegram:/rebuild by {update.effective_user.id}"
         )
         await update.message.reply_text(
-            "Rebuild requested. Host will recreate in ~15s. Ping after /health is OK."
+            "Restart requested. Host will systemctl restart in ~15s. Ping after /health is OK."
         )
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

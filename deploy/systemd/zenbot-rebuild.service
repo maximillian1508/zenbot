@@ -1,17 +1,12 @@
 [Unit]
-Description=Rebuild zen-agent-bot Docker stack
-After=docker.service network-online.target
-Requires=docker.service
+Description=Restart zen-agent-bot host service
+After=network-online.target zen-agent-bot.service
 
 [Service]
 Type=oneshot
-User=maxi
-Group=maxi
 Environment=HOME=/home/maxi
-Environment=ZENBOT_COMPOSE_DIR=/srv/apps/zen-agent-bot
 Environment=ZENBOT_DATA_DIR=/home/maxi/apps/zen-agent-bot/data
 Environment=ZENBOT_REBUILD_DELAY_SEC=15
-# docker group membership (or rootless) must allow User=maxi to talk to the daemon
-SupplementaryGroups=docker
+Environment=ZENBOT_SYSTEMD_UNIT=zen-agent-bot.service
 ExecStart=/home/maxi/apps/zen-agent-bot/scripts/deploy.sh
 Nice=10

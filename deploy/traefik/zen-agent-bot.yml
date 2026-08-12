@@ -1,0 +1,17 @@
+# Traefik v3 file provider — route admin UI to host systemd service.
+# Installed to /srv/apps/traefik/dynamic/zen-agent-bot.yml
+http:
+  routers:
+    zen-agent-admin:
+      rule: Host(`agents.maximillianleonard.dev`)
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: cf
+      service: zen-agent-admin
+  services:
+    zen-agent-admin:
+      loadBalancer:
+        servers:
+          # host-gateway → host bridge IP; ADMIN_LISTEN must be 0.0.0.0:8787 (not 127.0.0.1)
+          - url: http://host.docker.internal:8787

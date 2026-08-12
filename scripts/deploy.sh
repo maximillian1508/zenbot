@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Host-side deploy for zen-agent-bot. Triggered by systemd path unit when
+# Host-side restart for zen-agent-bot. Triggered by systemd path unit when
 # data/REQUEST_REBUILD appears, or run manually.
+# (Host systemd + uv — not Docker.)
 set -euo pipefail
 
-COMPOSE_DIR="${ZENBOT_COMPOSE_DIR:-/srv/apps/zen-agent-bot}"
 DATA_DIR="${ZENBOT_DATA_DIR:-/home/maxi/apps/zen-agent-bot/data}"
 FLAG="${DATA_DIR}/REQUEST_REBUILD"
 LOG_DIR="${DATA_DIR}/logs"
+UNIT="${ZENBOT_SYSTEMD_UNIT:-zen-agent-bot.service}"
 mkdir -p "$LOG_DIR" 2>/dev/null || true
 LOG="${LOG_DIR}/rebuild.log"
 if [[ ! -w "$LOG_DIR" ]]; then
@@ -14,11 +15,10 @@ if [[ ! -w "$LOG_DIR" ]]; then
   echo "WARN: $LOG_DIR not writable — logging to $LOG" >&2
 fi
 
-# Delay so Discord replies / agent final messages can flush before recreate.
 DELAY_SEC="${ZENBOT_REBUILD_DELAY_SEC:-15}"
 
 {
-  echo "==== $(date -Is) rebuild start ===="
+  echo "==== $(date -Is) restart start ===="
   if [[ -f "$FLAG" ]]; then
     echo "Flag contents:"
     cat "$FLAG" || true
@@ -26,18 +26,13 @@ DELAY_SEC="${ZENBOT_REBUILD_DELAY_SEC:-15}"
   fi
 
   if [[ "$DELAY_SEC" -gt 0 ]]; then
-    echo "Sleeping ${DELAY_SEC}s before recreate…"
+    echo "Sleeping ${DELAY_SEC}s before restart…"
     sleep "$DELAY_SEC"
   fi
 
-  cd "$COMPOSE_DIR"
-  echo "==> Building…"
-  docker compose build
+  echo "==> systemctl restart ${UNIT}"
+  systemctl restart "$UNIT"
 
-  echo "==> Recreating…"
-  docker compose up -d --force-recreate
-
-  # Clear flag after recreate starts so path unit can re-arm.
   rm -f "$FLAG"
 
   echo "==> Waiting for health…"
@@ -45,7 +40,7 @@ DELAY_SEC="${ZENBOT_REBUILD_DELAY_SEC:-15}"
   for _ in $(seq 1 45); do
     if curl -sf http://127.0.0.1:8787/health >/dev/null; then
       echo "OK: /health"
-      docker compose ps
+      systemctl is-active "$UNIT" || true
       ok=1
       break
     fi
@@ -54,8 +49,8 @@ DELAY_SEC="${ZENBOT_REBUILD_DELAY_SEC:-15}"
 
   if [[ "$ok" -ne 1 ]]; then
     echo "WARN: /health not ready after ~90s"
-    docker compose logs --tail=80 zen-agent-bot || true
+    journalctl -u "$UNIT" -n 80 --no-pager || true
     exit 1
   fi
-  echo "==== $(date -Is) rebuild done ===="
+  echo "==== $(date -Is) restart done ===="
 } 2>&1 | tee -a "$LOG"

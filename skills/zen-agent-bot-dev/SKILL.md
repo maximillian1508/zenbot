@@ -15,8 +15,8 @@ description: >-
 |------|------|
 | Source (git) | `~/apps/zen-agent-bot` |
 | GitHub | `git@github.com:maximillian1508/zenbot.git` |
-| Deploy stack | `/srv/apps/zen-agent-bot/docker-compose.yml` (build context = source tree) |
-| Admin UI | `https://agents.maximillianleonard.dev` (Traefik → container `:8787`) |
+| Deploy stack | Host systemd `zen-agent-bot.service` (`uv run`); Traefik file route |
+| Admin UI | `https://agents.maximillianleonard.dev` (Traefik → `host.docker.internal:8787`) |
 | Runtime data | `~/apps/zen-agent-bot/data/gateway.db` (SQLite; gitignored) |
 | Secrets | `~/apps/zen-agent-bot/.env` only — **never commit** |
 
@@ -55,18 +55,20 @@ set -a && source .env && set +a
 uv run zen-agent-bot
 ```
 
-## Deploy (Docker)
+## Deploy (host systemd + uv — preferred)
 
 ```bash
-cd /srv/apps/zen-agent-bot
-docker compose build && docker compose up -d --force-recreate
-docker compose logs -f --tail=50 zen-agent-bot
+# one-time cutover from Docker
+sudo /home/maxi/apps/zen-agent-bot/scripts/install-host-service.sh
+
+sudo systemctl restart zen-agent-bot
+journalctl -u zen-agent-bot -f
 curl -sS http://127.0.0.1:8787/health
 ```
 
-**Important:** On deploy, the container waits up to `SHUTDOWN_GRACE_SEC` (default **180s** / 3 min) for in-flight jobs to finish before exit. Set `stop_grace_period` in compose slightly above that (**190s**). Use `/cancel` in Discord to stop a run early.
+**Important:** On restart, systemd waits up to `TimeoutStopSec=190` (~3 min) for in-flight jobs (`SHUTDOWN_GRACE_SEC`, default 180s). Use `/cancel` in Discord to stop a run early.
 
-Container needs host mounts: `~/.local/share/cursor-agent`, `agent` binary, `~/.cursor`, `~/.config/cursor`, `~/apps/zen-agent-bot/data`, `~/apps/zen-agent-bot/agents`.
+The process runs as **maxi** with normal host access (`~/.ssh`, `agent`, `/srv`, docker CLI if in `docker` group). Admin listens on `0.0.0.0:8787` (required so Traefik-in-Docker can reach the host); Traefik file route exposes `agents.maximillianleonard.dev` on Tailscale. If Discord resumes fail with `attempt to write a readonly database`, chown root-owned files under `~/.cursor` left by the old Docker container.
 
 ## Code map
 
@@ -146,7 +148,7 @@ Or amend with `-F message.txt` and verify with `git log -1` before push.
 
 - Python 3.12 + uv; asyncio single process
 - Minimize diff scope; match existing style
-- Admin edits to allowlist apply live; **new bots / token changes need container restart**
+- Admin edits to allowlist apply live; **new bots / token changes need a service restart** (`systemctl restart` or `/rebuild`)
 
 ## Backlog (prioritized — pick from ROADMAP/FEATURES)
 
@@ -180,37 +182,30 @@ See also **Decisions (2026-08-12)** in `ROADMAP.md`.
 - 20+ chat platforms (use OpenClaw)
 - Voice
 
-## Self-deploy (manager rebuilds zenbot)
+## Self-deploy (manager restarts zenbot)
 
-The bot container has **no Docker socket**. Rebuilds go through a **host systemd path watcher**:
+Gateway runs **on the host** (systemd + uv). `/rebuild` does **not** need Docker:
 
 1. Manager writes `data/REQUEST_REBUILD` (slash `/rebuild` or agent code)
-2. Host unit `zenbot-rebuild.path` fires → `scripts/deploy.sh` (15s delay → build → recreate)
+2. Host unit `zenbot-rebuild.path` → `scripts/deploy.sh` (15s delay → `systemctl restart zen-agent-bot`)
 3. User pings the **same thread** after `/health` OK
 
-**One-time host install** (SSH to zenbook, not inside the container):
+**One-time host install:**
 
 ```bash
-sudo /home/maxi/apps/zen-agent-bot/scripts/install-rebuild-watcher.sh
+sudo /home/maxi/apps/zen-agent-bot/scripts/install-host-service.sh
 ```
 
-**Agent / Discord:** `/rebuild` on the **manager** bot (allowlisted). Or from shell inside a job:
-
-```python
-# gateway.request_rebuild(reason="…")  # writes data/REQUEST_REBUILD
-```
-
-Logs: `data/logs/rebuild.log` and `journalctl -u zenbot-rebuild.service -f`
-
-Do **not** call `docker compose` from inside the container.
+Logs: `journalctl -u zen-agent-bot -f`, `data/logs/rebuild.log`, `journalctl -u zenbot-rebuild.service -f`
 
 ## Testing checklist
 
-- `uv run zen-agent-bot` starts; Discord bots connect
+- `systemctl is-active zen-agent-bot` + Discord bots connect
 - Post in `#agent` → thread + streaming status + final reply
 - Follow-up while busy → queued message, then runs
 - Admin: allowlist add/remove without restart
-- After code change: `docker compose build && up -d`; verify `/health`
+- After code change: `/rebuild` or `sudo systemctl restart zen-agent-bot`; verify `/health`
+- `git push` works from agent jobs (host SSH keys)
 
 ## Delegation
 
