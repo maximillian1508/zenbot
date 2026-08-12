@@ -69,7 +69,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | 2.1 | **cursor-cli** (done) | Subscription | ✅ | `agent -p --force --resume` |
 | 2.2 | **cursor-sdk local** | Subscription | 🟡 1–2d | `AsyncClient.launch_bridge` + stream; needs `CURSOR_API_KEY` |
 | 2.3 | **claude-cli** | Claude Max/Pro | 🟢 1d | `claude -p --dangerously-skip-permissions` or sandbox profile |
-| 2.4 | **openrouter** | API $ | 🟡 2d | Chat completions only; **no native shell** — document clearly |
+| 2.4 | **openrouter** | API $ | ✅ | Chat completions only; **no native shell** |
 | 2.5 | **openrouter + tools** (optional later) | API $ | 🟠 1w | Reimplement tool loop or delegate hard tasks to cursor-cli |
 
 **Default routing suggestion:**
@@ -91,7 +91,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | 3.5 | **Pages: Routing** | Channel/thread → workspace + backend rules | 🟡 |
 | 3.6 | **Pages: Sessions** | View active session IDs, clear, link channels | 🟢 |
 | 3.7 | **Auth** | Password or Tailscale-only bind `127.0.0.1:8787` | 🟢 |
-| 3.8 | **Live status** | Running jobs, last error, agent login status | 🟡 |
+| 3.8 | **Live status** | Running jobs, last error, agent login status | ✅ |
 
 **Not in v1 web UI:** full chat (Discord/TG stay the chat UI). Web = **manage**, not replace messaging.
 
@@ -100,17 +100,22 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | # | Feature | Effort |
 |---|---------|--------|
 | 4.1 | systemd unit + `Restart=on-failure` | 🟢 |
-| 4.2 | Job queue (max N concurrent agents) | 🟡 1d |
-| 4.3 | `/cancel` in chat | 🟡 1d |
+| 4.2 | Job queue (max N concurrent agents) | 🟡 1d (partial ✅) |
+| 4.3 | `/cancel` in chat | ✅ |
+| 4.3b | Graceful shutdown (`stop_grace_period` + SIGTERM) | ✅ |
 | 4.4 | Skills prefix (load `~/.cursor/skills/*/SKILL.md` by name) | 🟡 1d |
 | 4.5 | Cron (`/schedule daily …`) | 🟡 2d |
 | 4.6 | Notifications (Discord/TG ping when long job finishes) | 🟢 |
+| 4.7 | Session hygiene (`/close`, prune stale mappings) | 🟢 Phase 2/3 |
 
 ### Phase 5 — Later / maybe
 
 | Feature | Effort | Note |
 |---------|--------|------|
-| Interactive tool approve (like CursorRemote) | 🔴 | Needs SDK + approval UX; CLI is force-or-nothing |
+| Master slash dispatch (`/run music …`) | 🟡 | Convenience on manager; keep 1-bot-per-profile |
+| OpenClaw-style bindings | 🟠 | Channel → agent/workspace |
+| @mention wake in shared channels | 🟡 | Optional; dedicated `#agent` channels stay default |
+| Interactive tool approve (like CursorRemote) | 🔴 | **P3+ after cursor-sdk**; Discord Accept/Deny; CLI `--force` = no prompts |
 | Persistent memory (Hermes-style) | 🔴 | Use files/skills first |
 | Slack, WhatsApp | 🟡 each | Copy transport pattern |
 | Cursor SDK cloud runtime | 🟡 | Offload to Cursor VM |
@@ -165,17 +170,39 @@ routing:
 
 ---
 
-## Suggested build order
+## Suggested build order (current)
 
-1. **Backend registry** + **cursor-cli** refactor (already mostly done)
-2. **Telegram** transport
-3. **config.yaml** + load from file (keep `.env` for secrets)
-4. **claude-cli** + **openrouter** backends
-5. **cursor-sdk** backend (streaming)
-6. **Web admin UI** (Phase 3)
-7. Streaming + job queue + `/cancel`
+1. ~~Backend registry + cursor-cli + multi-bot Discord + skills + config + admin UI~~ ✅
+2. ~~`/cancel` + graceful shutdown + self-rebuild~~ ✅
+3. ~~Admin live status~~ ✅
+4. ~~OpenRouter chat backend~~ ✅
+5. Telegram enable (when tokens ready)
+6. Claude Code backend (`claude -p`)
+7. Session hygiene (Phase 2/3) + master slash dispatch (Phase 2/3)
+8. cursor-sdk / cron / notifications / per-thread `/backend`
 
-**Rough total:** ~2–3 weeks part-time for Phases 1–3; Phase 4 as needed.
+---
+
+## Decisions (2026-08-12)
+
+Locked from planning with Maxi — keep these when picking backlog work.
+
+| Topic | Decision |
+|-------|----------|
+| **Session / thread hygiene** | Defer to **Phase 2/3**. Today: Discord 7-day auto-archive + `/new` + admin clear is enough. Later: prune stale SQLite rows, `/close`, admin stale-sessions view. |
+| **Multi-agent UX** | Keep **one Discord bot per profile** as primary. Optional later: manager slash to run specialists (`/run music …`) as convenience — not a replacement. |
+| **@mention wake (Claude-tag style)** | **Not needed** for now. Dedicated `#agent` / `#music-agent` channels are the wake boundary. Optional P2/P3 if we want bots in shared channels. |
+| **Self-rebuild mid-chat** | Flag file `data/REQUEST_REBUILD` + host systemd path unit → `scripts/deploy.sh`. Manager `/rebuild`. No Docker socket in the bot. |
+| **Persistent memory / @mention filtering in-model** | Out of scope. Gateway filters by channel/allowlist; no Hermes memory. |
+| **Interactive tool approve (Accept/Deny)** | **P3+, after cursor-sdk.** Today CLI uses `--force` (no per-tool prompts). Near-term control = allowlist + `/cancel` + channel isolation. Discord Accept/Deny buttons need an SDK (or non-force) bridge that emits pending tool calls — not on P1/P2. |
+
+**P1 queue:** ~~`/cancel`~~ → ~~graceful shutdown~~ → ~~admin live status~~ → Telegram → Claude backend.
+
+**Done extras:** OpenRouter chat backend (chat-only; set `OPENROUTER_API_KEY` + agent `default_backend`).
+
+**P2/P3 (explicitly wanted):** session hygiene · master slash dispatch · bindings/routing · per-thread `/backend` · cursor-sdk · cron · job-done notify · OpenRouter.
+
+**P3+ (deferred):** interactive tool approve from Discord — depends on cursor-sdk (or equivalent) approval events.
 
 ---
 
@@ -183,8 +210,8 @@ routing:
 
 - [ ] **Cross-channel sessions:** one linked session per “project” or keep Discord/TG separate?
 - [ ] **OpenRouter role:** chat-only assistant, or never for coding tasks?
-- [ ] **Web UI exposure:** localhost + Tailscale only, or public with auth?
-- [ ] **Secrets:** all in `.env`, web UI never stores tokens (only `*_env` keys)?
+- [x] **Web UI exposure:** public with auth (`agents.maximillianleonard.dev`) — current
+- [x] **Secrets:** `.env` only; web UI stores `*_env` names, not token values
 
 ---
 
@@ -194,3 +221,4 @@ routing:
 - Deep long-term memory / user modeling
 - MCP tool bridge at OpenClaw scale
 - Voice
+- Interactive tool approve from Discord/phone (**P3+ after cursor-sdk**; CLI `--force` has nothing to approve)

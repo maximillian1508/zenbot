@@ -46,10 +46,17 @@ uv run zen-agent-bot
 | **New task** | Post in the agent channel → bot creates a **thread** and runs Cursor agent |
 | **Follow-up** | Reply in the same thread (`--resume`). If a job is running, your message is **queued** |
 | **Fresh session** | `/new` in the thread |
-| **Check session** | `/status` |
+| **Cancel in-flight job** | `/cancel` in the thread |
+| **Rebuild container** | `/rebuild` on **manager** only (needs host watcher — see below) |
+| **Check session** | `/status` (Discord) or admin **Status** page |
+| **Live jobs / errors** | Admin UI → **Status** (auto-refresh) |
 | **List fleet** | `/agents` on the **manager** bot |
 
 Status messages **stream live** during runs (`STREAMING=false` to disable).
+
+## OpenRouter (optional)
+
+Chat-only backend (no shell/tools). Set `OPENROUTER_API_KEY` in `.env`, optionally `OPENROUTER_MODEL`, then set an agent's **default backend** to `openrouter` in the admin UI and **restart**. Good for cheap Q&A; keep `cursor-cli` for server/code work.
 
 ## Telegram (optional)
 
@@ -76,8 +83,18 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md), [FEATURES.md](./FEATURES.md), [ROADMAP
 
 ## Deploy notes
 
-- Wait for in-flight agent jobs to finish before `docker compose up -d --force-recreate` — a mid-deploy kill leaves orphaned Discord status messages.
-- Optional extra bind mounts (music library, apps tree) can be added to `docker-compose.yml` on your host; not required for the gateway itself.
+Self-rebuild (no Docker inside the bot container):
+
+```bash
+# one-time on the host
+sudo /home/maxi/apps/zen-agent-bot/scripts/install-rebuild-watcher.sh
+
+# then either:
+#   /rebuild  on @ZenManager (after this image is live), or
+#   echo reason | tee ~/apps/zen-agent-bot/data/REQUEST_REBUILD
+```
+
+Host waits ~15s, then `docker compose build && up -d --force-recreate`. Grace period on stop is ~3 min (`stop_grace_period` / `SHUTDOWN_GRACE_SEC`). Optional mounts (music library, `/srv/apps`) live in the host compose file.
 
 ## systemd (optional, bare metal)
 

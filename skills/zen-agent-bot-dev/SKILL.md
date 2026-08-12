@@ -64,7 +64,7 @@ docker compose logs -f --tail=50 zen-agent-bot
 curl -sS http://127.0.0.1:8787/health
 ```
 
-**Important:** Wait for in-flight agent jobs to finish before recreate — mid-deploy kill orphans Discord status messages and loses the run. No graceful shutdown yet (backlog item).
+**Important:** On deploy, the container waits up to `SHUTDOWN_GRACE_SEC` (default **180s** / 3 min) for in-flight jobs to finish before exit. Set `stop_grace_period` in compose slightly above that (**190s**). Use `/cancel` in Discord to stop a run early.
 
 Container needs host mounts: `~/.local/share/cursor-agent`, `agent` binary, `~/.cursor`, `~/.config/cursor`, `~/apps/zen-agent-bot/data`, `~/apps/zen-agent-bot/agents`.
 
@@ -78,7 +78,8 @@ Container needs host mounts: `~/.local/share/cursor-agent`, `agent` binary, `~/.
 | Gateway + queue | `src/zen_agent_bot/gateway/router.py` |
 | Cursor CLI backend | `src/zen_agent_bot/backends/cursor_cli.py` |
 | Discord / Telegram | `src/zen_agent_bot/transports/` |
-| Admin UI | `src/zen_agent_bot/web/app.py` |
+| Admin UI | `src/zen_agent_bot/web/app.py` (`/status` live jobs) |
+| Cursor CLI / OpenRouter | `src/zen_agent_bot/backends/` |
 | Prompt build | `src/zen_agent_bot/skills/loader.py` |
 
 ## Git commits (mandatory)
@@ -149,27 +150,59 @@ Or amend with `-F message.txt` and verify with `git log -1` before push.
 
 ## Backlog (prioritized — pick from ROADMAP/FEATURES)
 
+See also **Decisions (2026-08-12)** in `ROADMAP.md`.
+
 **P1 next**
 
-1. **`/cancel`** — kill running `agent` subprocess; track PIDs per session
-2. **Graceful shutdown** — `stop_grace_period` + SIGTERM handler; finish or cancel jobs cleanly on deploy
-3. **Admin live status** — running jobs, last error, `agent status`
+1. ~~**`/cancel`**~~ ✅
+2. ~~**Graceful shutdown**~~ ✅
+3. ~~**Admin live status**~~ ✅ — `/status`, `/api/status`, running jobs, last errors, `agent status`
 4. **Telegram enable** — transport coded; flip in admin + tokens when user wants
 5. **Claude Code backend** — `claude -p` subprocess adapter
 
-**P2 later**
+**Done (out of prior P2):** OpenRouter chat backend (`OPENROUTER_API_KEY`; set agent `default_backend` to `openrouter`; chat-only).
 
+**P2 / Phase 2–3 (wanted)**
+
+- Session hygiene — prune stale SQLite mappings, `/close`, admin stale-sessions
+- Master slash dispatch — `/run <agent> …` from manager (keep 1-bot-per-profile primary)
+- OpenClaw-style bindings / channel→agent routing
+- Per-thread `/backend` override
 - cursor-sdk local (stream + cancel)
 - Cron / scheduled jobs
 - Job-done Discord notification
-- OpenRouter chat backend
-- Per-thread `/backend` override
+- Optional @mention wake in shared channels (default stays dedicated `#agent` channels)
 
 **Out of scope / defer**
 
-- Interactive tool approve (needs SDK bridge)
+- Interactive tool approve (Accept/Deny) — **P3+ after cursor-sdk**; today `--force` auto-approves; near-term = `/cancel` + allowlist
+- Persistent memory (Hermes-style)
 - 20+ chat platforms (use OpenClaw)
 - Voice
+
+## Self-deploy (manager rebuilds zenbot)
+
+The bot container has **no Docker socket**. Rebuilds go through a **host systemd path watcher**:
+
+1. Manager writes `data/REQUEST_REBUILD` (slash `/rebuild` or agent code)
+2. Host unit `zenbot-rebuild.path` fires → `scripts/deploy.sh` (15s delay → build → recreate)
+3. User pings the **same thread** after `/health` OK
+
+**One-time host install** (SSH to zenbook, not inside the container):
+
+```bash
+sudo /home/maxi/apps/zen-agent-bot/scripts/install-rebuild-watcher.sh
+```
+
+**Agent / Discord:** `/rebuild` on the **manager** bot (allowlisted). Or from shell inside a job:
+
+```python
+# gateway.request_rebuild(reason="…")  # writes data/REQUEST_REBUILD
+```
+
+Logs: `data/logs/rebuild.log` and `journalctl -u zenbot-rebuild.service -f`
+
+Do **not** call `docker compose` from inside the container.
 
 ## Testing checklist
 

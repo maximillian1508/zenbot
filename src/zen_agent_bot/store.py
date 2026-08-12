@@ -302,6 +302,13 @@ class ConfigStore:
             self.set_setting("backend.cursor-cli.force", "true" if cli["force"] else "false")
         if cli.get("model"):
             self.set_setting("backend.cursor-cli.model", str(cli["model"]))
+        or_cfg = backends.get("openrouter") or {}
+        if or_cfg.get("model"):
+            self.set_setting("backend.openrouter.model", str(or_cfg["model"]))
+        if or_cfg.get("api_key_env"):
+            self.set_setting("backend.openrouter.api_key_env", str(or_cfg["api_key_env"]))
+        if or_cfg.get("base_url"):
+            self.set_setting("backend.openrouter.base_url", str(or_cfg["base_url"]))
         return True
 
     def migrate_sessions_json(self, path: Path) -> None:

@@ -4,6 +4,7 @@ from typing import Any
 
 from .base import AgentBackend, AgentRunResult
 from .cursor_cli import CursorCliBackend, CursorCliConfig
+from .openrouter import OpenRouterBackend, OpenRouterConfig
 
 
 def build_backends(raw: dict[str, Any]) -> dict[str, AgentBackend]:
@@ -19,6 +20,17 @@ def build_backends(raw: dict[str, Any]) -> dict[str, AgentBackend]:
                     timeout_sec=int(cfg.get("timeout_sec", 3600)),
                 )
             )
+        elif kind == "openrouter":
+            backends[name] = OpenRouterBackend(
+                OpenRouterConfig(
+                    api_key_env=str(cfg.get("api_key_env", "OPENROUTER_API_KEY")),
+                    model=str(cfg.get("model", "anthropic/claude-sonnet-4")),
+                    base_url=str(cfg.get("base_url", "https://openrouter.ai/api/v1")),
+                    timeout_sec=int(cfg.get("timeout_sec", 300)),
+                    site_url=cfg.get("site_url"),
+                    site_name=cfg.get("site_name", "zen-agent-bot"),
+                )
+            )
         else:
             raise ValueError(f"Unknown backend kind {kind!r} for {name!r}")
     if "cursor-cli" not in backends:
@@ -31,5 +43,7 @@ __all__ = [
     "AgentRunResult",
     "CursorCliBackend",
     "CursorCliConfig",
+    "OpenRouterBackend",
+    "OpenRouterConfig",
     "build_backends",
 ]

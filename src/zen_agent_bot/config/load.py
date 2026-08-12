@@ -88,6 +88,21 @@ def load_config() -> GatewayConfig:
     command = os.environ.get("AGENT_BIN") or db.get_setting("backend.cursor-cli.command", "agent") or "agent"
     force = _truthy(os.environ.get("AGENT_FORCE") or db.get_setting("backend.cursor-cli.force"), True)
     model = os.environ.get("AGENT_MODEL") or db.get_setting("backend.cursor-cli.model") or None
+
+    or_model = (
+        os.environ.get("OPENROUTER_MODEL")
+        or db.get_setting("backend.openrouter.model")
+        or "anthropic/claude-sonnet-4"
+    )
+    or_key_env = (
+        os.environ.get("OPENROUTER_API_KEY_ENV")
+        or db.get_setting("backend.openrouter.api_key_env")
+        or "OPENROUTER_API_KEY"
+    )
+    or_base = (
+        db.get_setting("backend.openrouter.base_url")
+        or "https://openrouter.ai/api/v1"
+    )
     backends = build_backends(
         {
             "cursor-cli": {
@@ -95,7 +110,13 @@ def load_config() -> GatewayConfig:
                 "command": command,
                 "force": force,
                 "model": model,
-            }
+            },
+            "openrouter": {
+                "kind": "openrouter",
+                "api_key_env": or_key_env,
+                "model": or_model,
+                "base_url": or_base,
+            },
         }
     )
 
