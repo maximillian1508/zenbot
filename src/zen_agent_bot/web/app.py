@@ -45,6 +45,7 @@ BASE_STYLE = """
   --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
 }
 * { box-sizing: border-box; }
+html, body { max-width: 100%; overflow-x: hidden; }
 body {
   margin: 0;
   font-family: var(--font);
@@ -54,20 +55,22 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 a { color: var(--accent); }
-.wrap { max-width: 1040px; margin: 0 auto; padding: 1rem 1rem 2.5rem; }
+.wrap {
+  width: 100%; max-width: 1040px; margin: 0 auto;
+  padding: 1rem 1rem 2.5rem; overflow-x: clip;
+}
 .top {
-  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
-  gap: 0.75rem 1.25rem; margin-bottom: 1.25rem; padding-bottom: 1rem;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 0.75rem; margin-bottom: 1.25rem; padding-bottom: 1rem;
   border-bottom: 1px solid var(--border);
 }
-.brand { min-width: 0; }
+.brand { min-width: 0; flex: 1 1 auto; }
 .brand h1 {
   margin: 0; font-size: 1.35rem; letter-spacing: -0.02em; font-weight: 700;
 }
 .brand p { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.9rem; }
 nav {
-  display: flex; flex-wrap: nowrap; gap: 0.35rem; overflow-x: auto;
-  -webkit-overflow-scrolling: touch; padding-bottom: 0.15rem; max-width: 100%;
+  display: flex; flex-wrap: wrap; gap: 0.35rem; max-width: 100%;
 }
 nav a {
   flex: 0 0 auto; text-decoration: none; color: var(--muted);
@@ -91,7 +94,7 @@ nav a.active {
 }
 .muted { color: var(--muted); font-size: 0.9rem; }
 .cards {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
   gap: 0.75rem; margin: 1rem 0 1.25rem;
 }
 .card {
@@ -163,10 +166,13 @@ button:hover, .btn:hover { filter: brightness(0.97); }
 .job-card .meta { color: var(--muted); font-size: 0.85rem; margin-top: 0.35rem; }
 .section { margin: 1.5rem 0 0.5rem; font-size: 1.05rem; }
 .hint { color: var(--muted); font-size: 0.9rem; margin: 0.35rem 0 1rem; }
-.header-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
+.header-actions {
+  display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;
+  justify-content: flex-start; min-width: 0; max-width: 100%;
+}
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 2.4rem; height: 2.4rem; padding: 0; border-radius: 8px;
+  width: 2.4rem; height: 2.4rem; padding: 0; border-radius: 8px; flex: 0 0 auto;
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
   cursor: pointer; box-shadow: var(--shadow);
 }
@@ -177,8 +183,8 @@ button:hover, .btn:hover { filter: brightness(0.97); }
   opacity: 0; pointer-events: none; transition: opacity 0.2s ease; z-index: 40;
 }
 .settings-panel {
-  position: fixed; top: 0; right: 0; height: 100%; width: min(26rem, 100%);
-  background: var(--surface); border-left: 1px solid var(--border);
+  position: fixed; top: 0; right: 0; height: 100%; width: min(26rem, 100vw);
+  max-width: 100%; background: var(--surface); border-left: 1px solid var(--border);
   box-shadow: -8px 0 24px rgba(16, 24, 40, 0.12);
   transform: translateX(100%); transition: transform 0.22s ease;
   z-index: 50; display: flex; flex-direction: column;
@@ -194,15 +200,30 @@ body.settings-open .settings-panel { transform: translateX(0); }
 .settings-body { padding: 1rem 1.1rem 2rem; overflow-y: auto; flex: 1; }
 .settings-body .section { margin-top: 1.25rem; }
 .settings-body label input[type=checkbox] { width: auto; margin-right: 0.45rem; }
+.settings-links { display: grid; gap: 0.5rem; margin: 0.5rem 0 0; }
+.settings-links a {
+  display: block; padding: 0.7rem 0.85rem; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg); text-decoration: none;
+  color: var(--text); font-weight: 600;
+}
+.settings-links a:hover { border-color: var(--accent); color: var(--accent); }
+.settings-links a span { display: block; color: var(--muted); font-weight: 500; font-size: 0.82rem; margin-top: 0.15rem; }
 @media (max-width: 700px) {
-  .wrap { padding: 0.85rem 0.85rem 2rem; }
+  .wrap { padding: 0.85rem max(0.85rem, env(safe-area-inset-right)) 2rem max(0.85rem, env(safe-area-inset-left)); }
+  .brand h1 { font-size: 1.2rem; }
+  .brand p { font-size: 0.82rem; }
+  .header-actions { width: 100%; }
+  nav { width: 100%; }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   input[type=text], textarea { max-width: none; }
   .desk-only { display: none !important; }
   .job-cards { display: grid; }
-  table { min-width: 420px; }
+  table { min-width: 0; }
+  .table-wrap { margin-left: 0; margin-right: 0; }
 }
 @media (min-width: 701px) {
   .mobile-only { display: none !important; }
+  .header-actions { justify-content: flex-end; flex: 1 1 auto; }
 }
 """
 
@@ -292,6 +313,12 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
       </button>
     </div>
     <div class="settings-body">
+      <h3 class="section">Manage</h3>
+      <div class="settings-links">
+        <a href="/agents">Agents<span>Profiles, Discord/Telegram tokens &amp; channels</span></a>
+        <a href="/allowlist">Allowlist<span>Who can message the bots</span></a>
+      </div>
+
       <h3 class="section">Gateway</h3>
       <p class="hint">Saved to SQLite. Streaming applies live; concurrent jobs &amp; guild need a restart.</p>
       <form method="post" action="/settings/save">
@@ -365,8 +392,6 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         links = [
             ("/", "Dashboard", "dashboard"),
             ("/status", "Status", "status"),
-            ("/allowlist", "Allowlist", "allowlist"),
-            ("/agents", "Agents", "agents"),
             ("/sessions", "Sessions", "sessions"),
         ]
         nav_parts = []
@@ -472,7 +497,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
           <div class="card"><span class="label">Telegram-ready</span>
             <div class="value">{tg_ready}</div></div>
         </div>
-        <p class="hint">Use the gear button for gateway settings, auth, and restart notes.</p>
+        <p class="hint">Agents &amp; allowlist live under the gear · Settings.</p>
         """
         return page(
             "Dashboard",
