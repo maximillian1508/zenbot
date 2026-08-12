@@ -209,20 +209,39 @@ class AgentDiscordBot(discord.Client):
                     f"(flag `{path.name}`). Ping this thread after `/health` is OK."
                 )
 
+        # Commands are registered as global on the tree. sync(guild=…) only
+        # pushes guild-scoped commands (we have none) and leaves globals stale —
+        # that is why /cancel disappeared from Discord after we added it.
         guild = discord.Object(id=self.guild_id) if self.guild_id else None
         if guild:
             try:
-                await self.tree.sync(guild=guild)
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                log.info(
+                    "Slash commands guild-synced for %s (%s): %s",
+                    self.profile.display_name,
+                    self.guild_id,
+                    ", ".join(sorted(c.name for c in synced)) or "(none)",
+                )
             except discord.Forbidden:
                 log.warning(
                     "Guild sync failed for %s (bot not in server %s?) — using global sync",
                     self.profile.display_name,
                     self.guild_id,
                 )
-                await self.tree.sync()
+                synced = await self.tree.sync()
+                log.info(
+                    "Slash commands global-synced for %s: %s",
+                    self.profile.display_name,
+                    ", ".join(sorted(c.name for c in synced)) or "(none)",
+                )
         else:
-            await self.tree.sync()
-        log.info("Slash commands synced for %s", self.profile.display_name)
+            synced = await self.tree.sync()
+            log.info(
+                "Slash commands global-synced for %s: %s",
+                self.profile.display_name,
+                ", ".join(sorted(c.name for c in synced)) or "(none)",
+            )
 
     async def on_ready(self) -> None:
         log.info(
