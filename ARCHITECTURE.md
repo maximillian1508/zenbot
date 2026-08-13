@@ -76,7 +76,8 @@ zen-agent-bot/
 │   └── web/                # FastAPI admin
 └── agents/                 # optional per-agent prompt files
     ├── manager/SOUL.md
-    └── music/SOUL.md
+    ├── music/SOUL.md
+    └── general/SOUL.md
 ```
 
 Patterns copied from elsewhere:
@@ -238,8 +239,9 @@ Cursor CLI picks up project skills from workspace too; explicit injection guaran
 
 | Profile | Primary backend | Fallback |
 |---------|-----------------|----------|
-| manager | `cursor-cli` | `openrouter` for quick Q&A |
+| manager | `cursor-cli` | — (server/code) |
 | music | `cursor-cli` | — (must have shell) |
+| general | `openrouter` | chat-only Q&A; no shell |
 
 Per-thread `/model <id>` and `/backend <id>` are live (`sessions.model` / `sessions.backend`). `/new` keeps both overrides and only drops `--resume`. Switching backend clears resume (ids don’t transfer). Resolve backend at job start: thread override → agent profile default. Then resolve model: thread → env → admin `backend.<kind>.model` → CLI default. See [ROADMAP.md](./ROADMAP.md#model-selection-2026-08-13).
 
@@ -276,7 +278,7 @@ Listen `127.0.0.1:8787`; expose via **Tailscale**, not public internet.
 ## Implementation phases (aligned with ROADMAP)
 
 1. **Refactor** → `backends/`, `transports/base`, `agents/profile`
-2. **Multi-bot Discord** → manager + music tokens from config
+2. **Multi-bot Discord** → manager + music + general tokens from config
 3. **Telegram** → same two profiles, two tokens
 4. **Skills loader** → per profile
 5. **config.yaml** + validation
@@ -291,7 +293,7 @@ Listen `127.0.0.1:8787`; expose via **Tailscale**, not public internet.
 |----------|----------------|
 | Linked sessions Discord ↔ Telegram? | Same **profile** shares session store key `profile_id + project_slug`; user runs `/project music` |
 | Manager auto-delegate to music? | v2; v1 use two bots |
-| How many Discord bots? | Start with **2** (manager + music); add more profiles in YAML |
+| How many Discord bots? | **3** (manager + music + general); add more profiles in admin |
 | Secrets | Admin **Secrets** (SQLite) or `.env` / systemd `EnvironmentFile`; YAML only `token_env` names |
 
 ---

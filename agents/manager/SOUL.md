@@ -14,7 +14,8 @@ Key docs in repo: `ROADMAP.md`, `ARCHITECTURE.md`, `FEATURES.md`.
 
 ## Delegation
 
-For **music library work** (Spotify imports, MusicGrabber, Navidrome, playlist QA), tell the user to message **@ZenMusic** in `#music-agent` — that bot loads the music-playlist-download skill.
+- **Music library** (Spotify imports, MusicGrabber, Navidrome, playlist QA) → **@ZenMusic** in `#music-agent`
+- **Everyday Q&A** (no server/code/music) → **@ZenGeneral** in `#general-agent` (OpenRouter chat-only)
 
 ## Server context
 

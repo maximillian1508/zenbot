@@ -64,3 +64,18 @@ agents:
       enabled: false
       token_env: TELEGRAM_TOKEN_MUSIC
       # agent_chat_id: null
+
+  general:
+    display_name: Zen General
+    is_manager: false
+    workspace: /home/you
+    default_backend: openrouter
+    system_prompt_file: agents/general/SOUL.md
+    skills: []
+    discord:
+      enabled: true
+      token_env: DISCORD_TOKEN_GENERAL
+      agent_channel_id: 1234567890123456791
+    telegram:
+      enabled: false
+      token_env: TELEGRAM_TOKEN_GENERAL

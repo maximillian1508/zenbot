@@ -31,7 +31,7 @@ Discord/Telegram → transports → Gateway (queue + sessions) → backends (cur
                               FastAPI admin UI (:8787)
 ```
 
-- **One Discord bot token per agent profile** (manager, music, …)
+- **One Discord bot token per agent profile** (manager, music, general, …)
 - **SOUL** = `agents/<id>/SOUL.md`; **skills** = extra markdown injected every prompt (paths in SQLite `agents.skills`)
 - **Sessions** = per thread key → Cursor `--resume` session_id
 - **Per-thread queue** = follow-ups while busy auto-run next (same thread)
