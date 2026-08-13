@@ -12,6 +12,14 @@ from typing import Any, Awaitable, Callable
 from ..agents.registry import AgentRegistry
 from ..backends.base import AgentBackend, is_stream_line_too_large
 from ..config.load import GatewayConfig
+from ..model_select import (
+    format_cursor_catalog,
+    format_model_status,
+    model_in_catalog,
+    parse_agent_models_output,
+    parse_model_arg,
+    resolve_model,
+)
 from ..sessions import SessionStore, ThreadSession
 from ..skills.loader import build_prompt
 from ..util.proc import terminate_process
@@ -167,6 +175,7 @@ class Gateway:
         self._shutting_down = False
         self._last_errors: deque[_ErrorRecord] = deque(maxlen=20)
         self._agent_status_cache: tuple[float, str] | None = None
+        self._cursor_models_cache: tuple[float, list[tuple[str, str]]] | None = None
 
     def session_key(self, agent_id: str, transport: str, channel_id: str | int) -> str:
         return f"{agent_id}:{transport}:{channel_id}"
@@ -337,6 +346,9 @@ class Gateway:
 
         profile = self.agents.get(job.agent_id)
         sess = self.store.get(job.session_key)
+        resolved = resolve_model(
+            self.config.db, job.session_key, profile.default_backend
+        )
         full_prompt = build_prompt(
             agent_id=profile.id,
             display_name=profile.display_name,
@@ -345,6 +357,7 @@ class Gateway:
             system_prompt=profile.system_prompt(self.config.project_root),
             skill_paths=profile.skills,
             user_message=job.user_prompt,
+            model=resolved.model,
         )
 
         run_handle = _RunHandle()
@@ -364,6 +377,7 @@ class Gateway:
                     on_progress=progress.push if progress else None,
                     cancel_event=run_handle.cancel_event,
                     register_proc=run_handle.register_proc,
+                    model=resolved.model,
                 )
             except Exception as exc:
                 log.exception("Agent run failed for %s", job.agent_id)
@@ -486,12 +500,84 @@ class Gateway:
     def clear_session(self, session_key: str) -> None:
         self.store.clear(session_key)
 
+    def reset_session_resume(self, session_key: str) -> None:
+        self.store.reset_resume(session_key)
+
     def get_session(self, session_key: str) -> ThreadSession:
         return self.store.get(session_key)
 
     def set_session_title(self, session_key: str, title: str) -> None:
         sess = self.store.get(session_key)
         self.store.set(session_key, ThreadSession(session_id=sess.session_id, title=title))
+
+    def _cursor_bin(self) -> str:
+        backend = self.backends.get("cursor-cli")
+        cfg = getattr(backend, "config", None)
+        return str(getattr(cfg, "command", None) or "agent")
+
+    async def cursor_models(self, *, force: bool = False) -> list[tuple[str, str]]:
+        """Cached `agent models` list: (id, label)."""
+        now = time.monotonic()
+        if (
+            not force
+            and self._cursor_models_cache is not None
+            and now - self._cursor_models_cache[0] < 120
+        ):
+            return self._cursor_models_cache[1]
+
+        cmd = self._cursor_bin()
+        rows: list[tuple[str, str]] = []
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                cmd,
+                "models",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            text = stdout.decode("utf-8", errors="replace")
+            if proc.returncode in (0, None):
+                rows = parse_agent_models_output(text)
+        except (FileNotFoundError, asyncio.TimeoutError, OSError):
+            rows = []
+        self._cursor_models_cache = (now, rows)
+        return rows
+
+    async def apply_model_command(
+        self,
+        *,
+        session_key: str,
+        agent_id: str,
+        raw: str | None,
+        include_catalog: bool = False,
+        catalog_max_chars: int = 1400,
+    ) -> str:
+        profile = self.agents.get(agent_id)
+        try:
+            action, value = parse_model_arg(raw)
+        except ValueError as exc:
+            return f"⚠️ {exc}"
+        if action == "set":
+            self.store.set_model(session_key, value)
+        elif action == "clear":
+            self.store.set_model(session_key, None)
+        resolved = resolve_model(self.config.db, session_key, profile.default_backend)
+        text = format_model_status(resolved)
+        if profile.default_backend != "cursor-cli":
+            return text
+        models = await self.cursor_models()
+        if action == "set" and value and models and not model_in_catalog(value, models):
+            text += (
+                f"\n⚠️ `{value}` is not in `agent models` — CLI may reject it. "
+                "Use `/model` with no args to see IDs."
+            )
+        if include_catalog:
+            text += "\n\n" + format_cursor_catalog(
+                models,
+                current=resolved.model,
+                max_chars=catalog_max_chars,
+            )
+        return text
 
     def request_rebuild(self, *, reason: str = "") -> Path:
         """Ask the host systemd watcher to rebuild this stack (data/REQUEST_REBUILD)."""
@@ -520,13 +606,7 @@ class Gateway:
         ):
             return self._agent_status_cache[1]
 
-        cmd = "agent"
-        for name, backend in self.backends.items():
-            cfg = getattr(backend, "config", None)
-            if name == "cursor-cli" or getattr(cfg, "command", None):
-                if getattr(cfg, "command", None):
-                    cmd = str(cfg.command)
-                break
+        cmd = self._cursor_bin()
 
         try:
             proc = await asyncio.create_subprocess_exec(

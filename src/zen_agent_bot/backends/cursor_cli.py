@@ -44,7 +44,13 @@ class CursorCliBackend:
             raise FileNotFoundError(f"Agent binary not found: {self.config.command}")
         return path
 
-    def _base_cmd(self, binary: str, workspace: Path, session_id: str | None) -> list[str]:
+    def _base_cmd(
+        self,
+        binary: str,
+        workspace: Path,
+        session_id: str | None,
+        model: str | None,
+    ) -> list[str]:
         cmd: list[str] = [
             binary,
             "-p",
@@ -53,8 +59,8 @@ class CursorCliBackend:
         ]
         if self.config.force:
             cmd.append("--force")
-        if self.config.model:
-            cmd.extend(["--model", self.config.model])
+        if model:
+            cmd.extend(["--model", model])
         if session_id:
             cmd.extend(["--resume", session_id])
         return cmd
@@ -83,6 +89,7 @@ class CursorCliBackend:
         on_progress: ProgressCallback | None = None,
         cancel_event: asyncio.Event | None = None,
         register_proc: RegisterProc | None = None,
+        model: str | None = None,
     ) -> AgentRunResult:
         binary = self._resolve_bin()
         if on_progress is not None:
@@ -94,6 +101,7 @@ class CursorCliBackend:
                 on_progress=on_progress,
                 cancel_event=cancel_event,
                 register_proc=register_proc,
+                model=model,
             )
         return await self._run_json(
             binary=binary,
@@ -102,6 +110,7 @@ class CursorCliBackend:
             session_id=session_id,
             cancel_event=cancel_event,
             register_proc=register_proc,
+            model=model,
         )
 
     async def _run_json(
@@ -113,8 +122,9 @@ class CursorCliBackend:
         session_id: str | None,
         cancel_event: asyncio.Event | None = None,
         register_proc: RegisterProc | None = None,
+        model: str | None = None,
     ) -> AgentRunResult:
-        cmd = self._base_cmd(binary, workspace, session_id)
+        cmd = self._base_cmd(binary, workspace, session_id, model)
         cmd.extend(["--output-format", "json", prompt])
 
         proc = await asyncio.create_subprocess_exec(
@@ -195,8 +205,9 @@ class CursorCliBackend:
         on_progress: ProgressCallback,
         cancel_event: asyncio.Event | None = None,
         register_proc: RegisterProc | None = None,
+        model: str | None = None,
     ) -> AgentRunResult:
-        cmd = self._base_cmd(binary, workspace, session_id)
+        cmd = self._base_cmd(binary, workspace, session_id, model)
         cmd.extend(
             [
                 "--output-format",

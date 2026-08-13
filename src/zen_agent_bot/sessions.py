@@ -9,6 +9,8 @@ from .store import ConfigStore
 class ThreadSession:
     session_id: str | None = None
     title: str | None = None
+    model: str | None = None
+    backend: str | None = None
 
 
 class SessionStore:
@@ -17,10 +19,24 @@ class SessionStore:
 
     def get(self, thread_key: str) -> ThreadSession:
         row = self.db.get_session(thread_key)
-        return ThreadSession(session_id=row.get("session_id"), title=row.get("title"))
+        return ThreadSession(
+            session_id=row.get("session_id"),
+            title=row.get("title"),
+            model=row.get("model"),
+            backend=row.get("backend"),
+        )
 
     def set(self, thread_key: str, session: ThreadSession) -> None:
         self.db.set_session(thread_key, session.session_id, session.title)
+
+    def set_model(self, thread_key: str, model: str | None) -> None:
+        self.db.set_session_model(thread_key, model)
+
+    def set_backend(self, thread_key: str, backend: str | None) -> None:
+        self.db.set_session_backend(thread_key, backend)
+
+    def reset_resume(self, thread_key: str) -> None:
+        self.db.reset_session_resume(thread_key)
 
     def clear(self, thread_key: str) -> None:
         self.db.clear_session(thread_key)

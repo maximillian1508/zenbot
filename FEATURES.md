@@ -48,8 +48,10 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | Streaming replies | ✅ | — | **done** | Discord status edit |
 | Telegram transport | ⚠️ coded | 🟢 | **P1 ★** | Enable second profile tokens |
 | File attachments | ✅ | — | **done** | Discord/TG → `data/attachments/`; paths in prompt (25 MiB / 10) |
-| Per-thread `/backend` | ❌ | 🟢 | **P1 ★** | Store in `sessions.json` |
+| Per-thread `/backend` | ❌ | 🟢 | **P2 ★** | Session `backend` column ready; slash still todo |
+| **Model selection** | ✅ | — | **done** | Admin fields + `/model` in thread; live apply |
 | Job queue + `/cancel` | ✅ | — | **done** | Graceful shutdown + `/rebuild` too |
+| **Queue Send now button** | ❌ | 🟢 | **P2 ★** | Discord Stop & send + Drop; see ROADMAP |
 | OpenRouter chat | ✅ | — | **done** | Chat-only; `OPENROUTER_API_KEY` |
 | Admin live status | ✅ | — | **done** | `/status` + `/api/status` |
 | Codex / other CLIs | ❌ | 🟢 each | P2 | ~50 lines per adapter |
@@ -90,7 +92,9 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 5. ~~`/cancel` + graceful shutdown + self-rebuild~~ ✅  
 6. ~~Admin live status + OpenRouter~~ ✅  
 7. Telegram enable → ~~Claude backend~~ → ~~file attachments~~ ✅  
-8. Phase 2/3: session hygiene, master slash dispatch, bindings  
-9. cursor-sdk / cron / notifications / per-thread `/backend`  
+8. ~~**Model selection**~~ ✅ — admin default models + `/model` in thread  
+9. Queue Send now — Discord Stop & send + Drop on queued follow-ups  
+10. Phase 2/3: session hygiene, master slash dispatch, bindings, `/backend`  
+11. cursor-sdk / cron / notifications  
 
 See [ROADMAP.md](./ROADMAP.md) — **Decisions (2026-08-12)** + billing/phase detail.

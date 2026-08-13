@@ -241,7 +241,7 @@ Cursor CLI picks up project skills from workspace too; explicit injection guaran
 | manager | `cursor-cli` | `openrouter` for quick Q&A |
 | music | `cursor-cli` | — (must have shell) |
 
-Override per session: `/backend openrouter` in chat (if allowed for that profile).
+Per-thread `/model <id>` is live (override stored on `sessions.model`). `/backend` still planned on the same row. Resolve model at job start: thread override → env → admin `backend.<kind>.model` → CLI default. See [ROADMAP.md](./ROADMAP.md#model-selection-2026-08-13).
 
 Billing reminder: [ROADMAP.md](./ROADMAP.md#billing--quota-important).
 
@@ -252,6 +252,7 @@ Billing reminder: [ROADMAP.md](./ROADMAP.md#billing--quota-important).
 **Admin only** — not a chat client.
 
 - Agent profiles (prompt, skills, workspace, backend)
+- Backend default **models** (Settings; live apply)
 - Transport tokens (`*_env` names, not values)
 - Routing rules
 - Session list / clear

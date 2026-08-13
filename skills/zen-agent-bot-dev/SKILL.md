@@ -152,7 +152,7 @@ Or amend with `-F message.txt` and verify with `git log -1` before push.
 
 ## Backlog (prioritized — pick from ROADMAP/FEATURES)
 
-See also **Decisions (2026-08-12)** in `ROADMAP.md`.
+See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROADMAP.md`.
 
 **P1 next**
 
@@ -163,14 +163,15 @@ See also **Decisions (2026-08-12)** in `ROADMAP.md`.
 5. ~~**Claude Code backend**~~ ✅ — `claude -p`; set agent `default_backend` to `claude-cli` (needs host `claude` login)
 6. ~~**File attachments**~~ ✅ — Discord/Telegram files → `data/attachments/`; paths injected into prompt (images via Read; other files by path; 25 MiB / 10 files)
 
-**Done (out of prior P2):** OpenRouter chat backend (`OPENROUTER_API_KEY`; set agent `default_backend` to `openrouter`; chat-only).
+**Done (out of prior P2):** OpenRouter chat backend; **model selection**.
 
 **P2 / Phase 2–3 (wanted)**
 
+- Queue Send now — Discord Stop & send + Drop on queued follow-ups
 - Session hygiene — prune stale SQLite mappings, `/close`, admin stale-sessions
 - Master slash dispatch — `/run <agent> …` from manager (keep 1-bot-per-profile primary)
 - OpenClaw-style bindings / channel→agent routing
-- Per-thread `/backend` override
+- Per-thread `/backend` override (reuse `/model` session columns)
 - cursor-sdk local (stream + cancel)
 - Cron / scheduled jobs
 - Job-done Discord notification
@@ -203,7 +204,7 @@ Logs: `journalctl -u zen-agent-bot -f`, `data/logs/rebuild.log`, `journalctl -u 
 
 - `systemctl is-active zen-agent-bot` + Discord bots connect
 - Post in `#agent` → thread + streaming status + final reply
-- Follow-up while busy → queued message, then runs
+- Follow-up while busy → queued message; then runs
 - Admin: allowlist add/remove without restart
 - After code change: `/rebuild` or `sudo systemctl restart zen-agent-bot`; verify `/health`
 - `git push` works from agent jobs (host SSH keys)

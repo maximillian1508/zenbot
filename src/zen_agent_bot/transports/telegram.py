@@ -162,6 +162,7 @@ class TelegramAgentApp:
         app.add_handler(CommandHandler("new", self.cmd_new))
         app.add_handler(CommandHandler("status", self.cmd_status))
         app.add_handler(CommandHandler("cancel", self.cmd_cancel))
+        app.add_handler(CommandHandler("model", self.cmd_model))
         if self.profile.is_manager:
             app.add_handler(CommandHandler("agents", self.cmd_agents))
             app.add_handler(CommandHandler("rebuild", self.cmd_rebuild))
@@ -184,8 +185,10 @@ class TelegramAgentApp:
             await update.message.reply_text("Not authorized.")  # type: ignore[union-attr]
             return
         key = self._session_key(update.effective_chat.id, update.message.message_thread_id if update.message else None)  # type: ignore[union-attr]
-        self.gateway.clear_session(key)
-        await update.message.reply_text("New session. Next message starts fresh.")  # type: ignore[union-attr]
+        self.gateway.reset_session_resume(key)
+        await update.message.reply_text(
+            "New session. Next message starts fresh. /model override is kept."
+        )  # type: ignore[union-attr]
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.effective_chat or not update.message:
@@ -201,6 +204,9 @@ class TelegramAgentApp:
                 msg += f"\nTitle: {sess.title}"
         else:
             msg = "No session yet."
+        msg += "\n\n" + await self.gateway.apply_model_command(
+            session_key=key, agent_id=self.agent_id, raw=None
+        )
         await update.message.reply_text(msg, parse_mode="Markdown")
 
     async def cmd_cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -214,6 +220,24 @@ class TelegramAgentApp:
             await update.message.reply_text("Cancelling the running job…")
         else:
             await update.message.reply_text("Nothing running in this thread.")
+
+    async def cmd_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.effective_chat or not update.message:
+            return
+        if not self.gateway.is_allowed(update.effective_user.id):
+            await update.message.reply_text("Not authorized.")
+            return
+        key = self._session_key(update.effective_chat.id, update.message.message_thread_id)
+        raw = " ".join(context.args) if context.args else None
+        include_catalog = not raw or raw.strip().lower() in {"list", "ls"}
+        msg = await self.gateway.apply_model_command(
+            session_key=key,
+            agent_id=self.agent_id,
+            raw=raw,
+            include_catalog=include_catalog,
+            catalog_max_chars=2800,
+        )
+        await update.message.reply_text(msg, parse_mode="Markdown")
 
     async def cmd_agents(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:

@@ -61,6 +61,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | 1.5 | **Backend registry** | Pluggable `AgentBackend` protocol | 🟢 0.5d | — |
 | 1.6 | **Per-chat backend + workspace** | `/backend cursor`, `/workspace /home/maxi` | 🟢 1d | config store |
 | 1.7 | **Streaming to chat** | Edit one Discord/TG message while agent runs | 🟡 1–2d | `stream-json` |
+| 1.8 | **Model selection** | Admin default models + `/model` in thread | ✅ | sessions + settings (see below) |
 
 ### Phase 2 — Backends
 
@@ -87,7 +88,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | 3.1 | **Config file** `data/config.yaml` | Single source of truth (replaces most `.env`) | 🟢 0.5d |
 | 3.2 | **FastAPI admin app** | Local-only config UI | 🟡 2–3d | **v1 done** — allowlist, agents, sessions |
 | 3.3 | **Pages: Channels** | Enable Discord/TG, tokens (masked), allowlists | 🟡 |
-| 3.4 | **Pages: Backends** | Default backend, API keys, model names, `force` flags | 🟡 |
+| 3.4 | **Pages: Backends** | Default backend, API keys, **model names**, `force` flags | 🟡 | model fields in Settings ✅; full Backends page still later |
 | 3.5 | **Pages: Routing** | Channel/thread → workspace + backend rules | 🟡 |
 | 3.6 | **Pages: Sessions** | View active session IDs, clear, link channels | 🟢 |
 | 3.7 | **Auth** | Password or Tailscale-only bind `127.0.0.1:8787` | 🟢 |
@@ -101,6 +102,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 |---|---------|--------|
 | 4.1 | systemd unit + `Restart=on-failure` | 🟢 |
 | 4.2 | Job queue (max N concurrent agents) | 🟡 1d (partial ✅) |
+| 4.2b | Queue **Send now** button (Stop & send) | 🟡 0.5d | Discord + Drop |
 | 4.3 | `/cancel` in chat | ✅ |
 | 4.3b | Graceful shutdown (`stop_grace_period` + SIGTERM) | ✅ |
 | 4.4 | Skills prefix (load `~/.cursor/skills/*/SKILL.md` by name) | 🟡 1d |
@@ -179,8 +181,10 @@ routing:
 5. Telegram enable (when tokens ready)
 6. ~~Claude Code backend (`claude -p`)~~ ✅
 7. ~~**File attachments**~~ ✅ — Discord/Telegram → `data/attachments/` + paths in prompt
-8. Session hygiene (Phase 2/3) + master slash dispatch (Phase 2/3)
-9. cursor-sdk / cron / notifications / per-thread `/backend`
+8. ~~**Model selection**~~ ✅ — admin fields + per-thread `/model` (session override; share plumbing with `/backend`)
+9. Queue “Send now” button (Discord Stop & send)
+10. Session hygiene (Phase 2/3) + master slash dispatch (Phase 2/3)
+11. cursor-sdk / cron / notifications / per-thread `/backend`
 
 ---
 
@@ -201,7 +205,55 @@ Locked from planning with Maxi — keep these when picking backlog work.
 
 **Done extras:** OpenRouter chat backend; Claude Code backend; file attachments (Discord/TG → `data/attachments/`, paths in prompt; 25 MiB / 10 files).
 
-**P2/P3 (explicitly wanted):** session hygiene · master slash dispatch · bindings/routing · per-thread `/backend` · cursor-sdk · cron · job-done notify · OpenRouter.
+**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · queue Send now button · session hygiene · master slash dispatch · bindings/routing · per-thread `/backend` · cursor-sdk · cron · job-done notify · OpenRouter.
+
+### Model selection (2026-08-13)
+
+**Shipped.** Admin defaults + `/model` in the thread. Not a process-wide-only knob.
+
+**Admin**
+
+- Settings (or agent form): default model per backend — `backend.cursor-cli.model`, `backend.claude-cli.model`, `backend.openrouter.model` (keys already exist; UI does not).
+- Blank = omit `--model` / use that CLI’s default (OpenRouter keeps its current default string).
+- Env still wins if set: `AGENT_MODEL`, `CLAUDE_MODEL`, `OPENROUTER_MODEL`.
+- Apply **live** (like allowlist): read model at job start, do not bake only at process boot. No restart for model edits.
+
+**Thread**
+
+- `/model` — show effective model (thread → admin/env → CLI default).
+- `/model <id>` — set override for **this thread only** (e.g. `composer-2.5`, `sonnet`, `anthropic/claude-sonnet-4`).
+- `/model clear` (or `default`) — drop override; next job uses admin/env.
+- Store on `sessions` (add `model` column; same row as planned `backend` for `/backend`).
+- In-flight job unchanged; next queued/new job in the thread picks it up.
+- Discord slash + Telegram text command.
+
+**Resolve at job start**
+
+1. Thread `/model` override  
+2. Admin/env default for the **active backend**  
+3. CLI / OpenRouter built-in default  
+
+`/backend` (still P2) should reuse the same session-override columns.
+
+### Queue “Send now” (2026-08-13)
+
+**Planned.** Button on a **queued** follow-up = Cursor CLI **Stop & send** (2nd Enter / Cmd+Enter), not IDE “steer into the running turn”.
+
+Today: follow-ups while busy sit in the per-thread queue until the current job finishes. `/cancel` stops the runner, then the next queued job starts.
+
+**v1 (Discord)**
+
+- Queued status message gets a **Send now** button (allowlisted users only).
+- Click → cancel the in-flight job (keep partial text, same as `/cancel`) → jump **this** follow-up to the front → it runs next.
+- Status becomes `⏭ Sending now — stopping current job…`; button disabled after click.
+- Several queued messages: each has its own button; Send now on one only promotes that job.
+- Optional sibling: **Drop** (unqueue, no cancel).
+
+**Not in v1**
+
+- Inject / steer into a live `agent -p` turn (needs cursor-sdk or a mid-run stdin protocol we don’t have).
+- Telegram inline button (same gateway action later).
+- Change default from queue-until-done to always-interrupt.
 
 **P3+ (deferred):** interactive tool approve from Discord — depends on cursor-sdk (or equivalent) approval events.
 

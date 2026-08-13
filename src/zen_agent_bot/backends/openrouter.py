@@ -76,12 +76,13 @@ class OpenRouterBackend:
         on_progress: ProgressCallback | None = None,
         cancel_event: asyncio.Event | None = None,
         register_proc: RegisterProc | None = None,
+        model: str | None = None,
     ) -> AgentRunResult:
         _ = workspace, register_proc  # chat-only; no subprocess
         new_session = self._session_id(session_id)
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
         payload = {
-            "model": self.config.model,
+            "model": model or self.config.model,
             "messages": [
                 {"role": "system", "content": CHAT_ONLY_SYSTEM},
                 {"role": "user", "content": prompt},

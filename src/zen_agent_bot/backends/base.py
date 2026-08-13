@@ -40,4 +40,5 @@ class AgentBackend(Protocol):
         on_progress: ProgressCallback | None = None,
         cancel_event: asyncio.Event | None = None,
         register_proc: RegisterProc | None = None,
+        model: str | None = None,
     ) -> AgentRunResult: ...

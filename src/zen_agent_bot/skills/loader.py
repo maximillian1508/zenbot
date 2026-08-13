@@ -18,9 +18,11 @@ def build_prompt(
     system_prompt: str,
     skill_paths: tuple[str, ...],
     user_message: str,
+    model: str | None = None,
 ) -> str:
+    model_bit = f" | Model: {model}" if model else ""
     parts: list[str] = [
-        f"[Agent: {agent_id} ({display_name}) | Backend: {backend} | Workspace: {workspace}]",
+        f"[Agent: {agent_id} ({display_name}) | Backend: {backend}{model_bit} | Workspace: {workspace}]",
     ]
     if system_prompt:
         parts.extend(["", "--- System ---", system_prompt, "---"])

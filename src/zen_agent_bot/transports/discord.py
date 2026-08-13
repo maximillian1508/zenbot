@@ -127,9 +127,10 @@ class AgentDiscordBot(discord.Client):
                 await interaction.response.send_message("No channel.", ephemeral=True)
                 return
             key = self.gateway.session_key(agent_id, "discord", thread_key(channel))
-            self.gateway.clear_session(key)
+            self.gateway.reset_session_resume(key)
             await interaction.response.send_message(
-                "New session. Your next message here starts fresh (no `--resume`)."
+                "New session. Your next message here starts fresh (no `--resume`). "
+                "`/model` override is kept."
             )
 
         @self.tree.command(name="status", description="Show agent session for this thread")
@@ -149,6 +150,9 @@ class AgentDiscordBot(discord.Client):
                     msg += f"\n**Title:** {sess.title}"
             else:
                 msg = "No session yet — next message starts a new agent run."
+            msg += "\n\n" + await self.gateway.apply_model_command(
+                session_key=key, agent_id=agent_id, raw=None
+            )
             await interaction.response.send_message(msg, ephemeral=True)
 
         @self.tree.command(
@@ -174,6 +178,62 @@ class AgentDiscordBot(discord.Client):
                     "Nothing running in this thread.",
                     ephemeral=True,
                 )
+
+        @self.tree.command(
+            name="model",
+            description="Show Cursor models or set the model for this thread",
+        )
+        @app_commands.describe(
+            name="Model id from agent models, or clear/default"
+        )
+        async def cmd_model(
+            interaction: discord.Interaction, name: str | None = None
+        ) -> None:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                await interaction.response.send_message("Not authorized.", ephemeral=True)
+                return
+            channel = interaction.channel
+            if channel is None:
+                await interaction.response.send_message("No channel.", ephemeral=True)
+                return
+            key = self.gateway.session_key(agent_id, "discord", thread_key(channel))
+            include_catalog = name is None or name.strip().lower() in {"", "list", "ls"}
+            msg = await self.gateway.apply_model_command(
+                session_key=key,
+                agent_id=agent_id,
+                raw=name,
+                include_catalog=include_catalog,
+                catalog_max_chars=1400,
+            )
+            await interaction.response.send_message(msg, ephemeral=True)
+
+        @cmd_model.autocomplete("name")
+        async def model_autocomplete(
+            interaction: discord.Interaction, current: str
+        ) -> list[app_commands.Choice[str]]:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                return []
+            q = current.lower().strip()
+            choices: list[app_commands.Choice[str]] = []
+            extras = [
+                ("clear", "clear thread override"),
+                ("default", "admin / CLI default"),
+            ]
+            try:
+                models = await self.gateway.cursor_models()
+            except Exception:
+                models = []
+            for mid, label in extras + models:
+                hay = f"{mid} {label}".lower()
+                if q and q not in hay:
+                    continue
+                display = f"{label} · {mid}" if label != mid else mid
+                if len(display) > 100:
+                    display = display[:97] + "…"
+                choices.append(app_commands.Choice(name=display, value=mid[:100]))
+                if len(choices) >= 25:
+                    break
+            return choices
 
         if is_manager:
 

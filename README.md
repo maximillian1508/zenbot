@@ -46,9 +46,10 @@ uv run zen-agent-bot
 | Action | How |
 |--------|-----|
 | **New task** | Post in the agent channel → bot creates a **thread** and runs Cursor agent |
-| **Follow-up** | Reply in the same thread (`--resume`). If a job is running, your message is **queued** |
+| **Follow-up** | Reply in the same thread (`--resume`). If a job is running, your message is **queued** until it finishes |
 | **Attach files** | Drop images/docs in the thread (or with your message) — saved under `data/attachments/` and paths go into the prompt |
-| **Fresh session** | `/new` in the thread |
+| **Fresh session** | `/new` in the thread (keeps `/model` override) |
+| **Model** | `/model` lists Cursor CLI models · `/model composer-2.5` this thread · `/model clear` |
 | **Cancel in-flight job** | `/cancel` in the thread |
 | **Restart gateway** | `/rebuild` on **manager** (host `systemctl restart`) |
 | **Check session** | `/status` (Discord) or admin **Status** page |
@@ -59,7 +60,7 @@ Status messages **stream live** during runs (`STREAMING=false` to disable).
 
 ## OpenRouter (optional)
 
-Chat-only backend (no shell/tools). Set `OPENROUTER_API_KEY` in `.env`, optionally `OPENROUTER_MODEL`, then set an agent's **default backend** to `openrouter` in the admin UI and **restart**. Good for cheap Q&A; keep `cursor-cli` for server/code work.
+Chat-only backend (no shell/tools). Set `OPENROUTER_API_KEY` in `.env`, optionally `OPENROUTER_MODEL`, then set an agent's **default backend** to `openrouter` in the admin UI and **restart**. Default model is also editable in Settings (live). Good for cheap Q&A; keep `cursor-cli` for server/code work.
 
 ## Claude Code (optional)
 

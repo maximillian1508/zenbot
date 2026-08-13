@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     session_key TEXT PRIMARY KEY,
     session_id TEXT,
     title TEXT,
+    model TEXT,
+    backend TEXT,
     updated_at TEXT
 );
 """
@@ -65,7 +67,18 @@ class ConfigStore:
         self._conn.execute("PRAGMA foreign_keys=ON")
         with self._lock:
             self._conn.executescript(SCHEMA)
+            self._migrate_session_columns()
             self._conn.commit()
+
+    def _migrate_session_columns(self) -> None:
+        cols = {
+            str(row[1])
+            for row in self._conn.execute("PRAGMA table_info(sessions)").fetchall()
+        }
+        if "model" not in cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN model TEXT")
+        if "backend" not in cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN backend TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -222,20 +235,37 @@ class ConfigStore:
 
     def list_sessions(self) -> dict[str, dict[str, str | None]]:
         rows = self._conn.execute(
-            "SELECT session_key, session_id, title FROM sessions ORDER BY session_key"
+            "SELECT session_key, session_id, title, model, backend "
+            "FROM sessions ORDER BY session_key"
         ).fetchall()
         return {
-            str(r["session_key"]): {"session_id": r["session_id"], "title": r["title"]}
+            str(r["session_key"]): {
+                "session_id": r["session_id"],
+                "title": r["title"],
+                "model": r["model"],
+                "backend": r["backend"],
+            }
             for r in rows
         }
 
     def get_session(self, key: str) -> dict[str, str | None]:
         row = self._conn.execute(
-            "SELECT session_id, title FROM sessions WHERE session_key = ?", (key,)
+            "SELECT session_id, title, model, backend FROM sessions WHERE session_key = ?",
+            (key,),
         ).fetchone()
         if not row:
-            return {"session_id": None, "title": None}
-        return {"session_id": row["session_id"], "title": row["title"]}
+            return {
+                "session_id": None,
+                "title": None,
+                "model": None,
+                "backend": None,
+            }
+        return {
+            "session_id": row["session_id"],
+            "title": row["title"],
+            "model": row["model"],
+            "backend": row["backend"],
+        }
 
     def set_session(self, key: str, session_id: str | None, title: str | None) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -250,6 +280,50 @@ class ConfigStore:
                     updated_at = excluded.updated_at
                 """,
                 (key, session_id, title, now),
+            )
+            self._conn.commit()
+
+    def set_session_model(self, key: str, model: str | None) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO sessions(session_key, model, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(session_key) DO UPDATE SET
+                    model = excluded.model,
+                    updated_at = excluded.updated_at
+                """,
+                (key, model, now),
+            )
+            self._conn.commit()
+
+    def set_session_backend(self, key: str, backend: str | None) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO sessions(session_key, backend, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(session_key) DO UPDATE SET
+                    backend = excluded.backend,
+                    updated_at = excluded.updated_at
+                """,
+                (key, backend, now),
+            )
+            self._conn.commit()
+
+    def reset_session_resume(self, key: str) -> None:
+        """Clear --resume mapping; keep /model and /backend overrides."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE sessions
+                SET session_id = NULL, title = NULL, updated_at = ?
+                WHERE session_key = ?
+                """,
+                (now, key),
             )
             self._conn.commit()
 

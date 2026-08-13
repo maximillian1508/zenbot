@@ -58,12 +58,14 @@ class ClaudeCliBackend:
             )
         return path
 
-    def _base_cmd(self, binary: str, session_id: str | None) -> list[str]:
+    def _base_cmd(
+        self, binary: str, session_id: str | None, model: str | None
+    ) -> list[str]:
         cmd: list[str] = [binary, "-p"]
         if self.config.force:
             cmd.append("--dangerously-skip-permissions")
-        if self.config.model:
-            cmd.extend(["--model", self.config.model])
+        if model:
+            cmd.extend(["--model", model])
         resume = _usable_resume(session_id)
         if resume:
             cmd.extend(["--resume", resume])
@@ -93,6 +95,7 @@ class ClaudeCliBackend:
         on_progress: ProgressCallback | None = None,
         cancel_event: asyncio.Event | None = None,
         register_proc: RegisterProc | None = None,
+        model: str | None = None,
     ) -> AgentRunResult:
         binary = self._resolve_bin()
         if on_progress is not None:
@@ -104,6 +107,7 @@ class ClaudeCliBackend:
                 on_progress=on_progress,
                 cancel_event=cancel_event,
                 register_proc=register_proc,
+                model=model,
             )
         return await self._run_json(
             binary=binary,
@@ -112,6 +116,7 @@ class ClaudeCliBackend:
             session_id=session_id,
             cancel_event=cancel_event,
             register_proc=register_proc,
+            model=model,
         )
 
     async def _run_json(
@@ -123,8 +128,9 @@ class ClaudeCliBackend:
         session_id: str | None,
         cancel_event: asyncio.Event | None = None,
         register_proc: RegisterProc | None = None,
+        model: str | None = None,
     ) -> AgentRunResult:
-        cmd = self._base_cmd(binary, session_id)
+        cmd = self._base_cmd(binary, session_id, model)
         cmd.extend(["--output-format", "json", prompt])
 
         proc = await asyncio.create_subprocess_exec(
@@ -205,8 +211,9 @@ class ClaudeCliBackend:
         on_progress: ProgressCallback,
         cancel_event: asyncio.Event | None = None,
         register_proc: RegisterProc | None = None,
+        model: str | None = None,
     ) -> AgentRunResult:
-        cmd = self._base_cmd(binary, session_id)
+        cmd = self._base_cmd(binary, session_id, model)
         cmd.extend(
             [
                 "--output-format",

@@ -28,4 +28,5 @@ async def run_agent(
         prompt=prompt,
         workspace=workspace,
         session_id=session_id,
+        model=model,
     )

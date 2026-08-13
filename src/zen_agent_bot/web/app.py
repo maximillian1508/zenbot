@@ -289,6 +289,20 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             or db.get_setting("discord_guild_id")
             or ""
         ).strip()
+        cursor_model = db.get_setting("backend.cursor-cli.model") or ""
+        claude_model = db.get_setting("backend.claude-cli.model") or ""
+        openrouter_model = db.get_setting("backend.openrouter.model") or ""
+        env_model_hits = [
+            name
+            for name in ("AGENT_MODEL", "CLAUDE_MODEL", "OPENROUTER_MODEL")
+            if os.environ.get(name, "").strip()
+        ]
+        env_model_note = (
+            f'<div class="callout warn">Env currently overrides admin models: '
+            f'<code>{html.escape(", ".join(env_model_hits))}</code></div>'
+            if env_model_hits
+            else ""
+        )
         pw = _admin_password()
         auth_html = (
             '<div class="callout">Auth protected (<code>ADMIN_PASSWORD</code> set).</div>'
@@ -321,7 +335,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
       </div>
 
       <h3 class="section">Gateway</h3>
-      <p class="hint">Saved to SQLite. Streaming applies live; concurrent jobs &amp; guild need a restart.</p>
+      <p class="hint">Saved to SQLite. Streaming &amp; models apply live; concurrent jobs &amp; guild need a restart.</p>
       <form method="post" action="/settings/save">
         <label><input type="checkbox" name="streaming_enabled" {streaming_checked}> Discord/Telegram streaming status edits</label>
         <label>Max concurrent jobs
@@ -330,6 +344,17 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         <label>Discord guild ID (slash sync)
           <input type="text" name="discord_guild_id" value="{html.escape(guild)}" inputmode="numeric" pattern="[0-9]*" placeholder="optional">
         </label>
+        <h3 class="section">Default models</h3>
+        <p class="hint">Blank = CLI default (OpenRouter falls back to <code>anthropic/claude-sonnet-4</code>).
+        Thread <code>/model</code> overrides these. Env <code>AGENT_MODEL</code> / <code>CLAUDE_MODEL</code> /
+        <code>OPENROUTER_MODEL</code> wins if set. Next job picks this up — no restart.</p>
+        {env_model_note}
+        <label>cursor-cli model
+          <input type="text" name="cursor_model" value="{html.escape(cursor_model)}" placeholder="e.g. composer-2.5"></label>
+        <label>claude-cli model
+          <input type="text" name="claude_model" value="{html.escape(claude_model)}" placeholder="e.g. sonnet"></label>
+        <label>openrouter model
+          <input type="text" name="openrouter_model" value="{html.escape(openrouter_model)}" placeholder="e.g. anthropic/claude-sonnet-4"></label>
         <p><button type="submit">Save settings</button></p>
       </form>
 
@@ -340,7 +365,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
       <p class="hint">DB <code>{html.escape(str(db.path))}</code></p>
       <div class="callout">
         <strong>Live vs restart</strong><br>
-        Allowlist and session clears apply immediately.
+        Allowlist, session clears, and model defaults apply immediately.
         New bots / token or channel changes need a host restart
         (<code>systemctl restart zen-agent-bot</code> or Discord <code>/rebuild</code>).
       </div>
@@ -514,6 +539,9 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         streaming_enabled: str | None = Form(None),
         max_concurrent_jobs: str = Form("2"),
         discord_guild_id: str = Form(""),
+        cursor_model: str = Form(""),
+        claude_model: str = Form(""),
+        openrouter_model: str = Form(""),
         _: None = Depends(require_auth),
     ) -> RedirectResponse:
         jobs_raw = max_concurrent_jobs.strip() or "2"
@@ -531,6 +559,9 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             db.set_setting("discord_guild_id", guild)
         else:
             db.set_setting("discord_guild_id", "")
+        db.set_setting("backend.cursor-cli.model", cursor_model.strip())
+        db.set_setting("backend.claude-cli.model", claude_model.strip())
+        db.set_setting("backend.openrouter.model", openrouter_model.strip())
         if gateway is not None:
             gateway.config.streaming_enabled = stream_on
         return RedirectResponse("/?saved=settings", status_code=303)
@@ -841,20 +872,23 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         rows = []
         for key, row in data.items():
             sid = row.get("session_id") or ""
+            model = row.get("model") or ""
             rows.append(
                 f"<tr><td><code title=\"{html.escape(key)}\">{html.escape(_short_key(key, 40))}</code></td>"
                 f"<td>{html.escape(row.get('title') or '')}</td>"
                 f"<td><code>{html.escape(sid[:16])}{'…' if len(sid) > 16 else ''}</code></td>"
+                f"<td>{html.escape(model) or '—'}</td>"
                 f"<td><form method='post' action='/sessions/clear' class='row-actions'>"
                 f"<input type='hidden' name='key' value='{html.escape(key)}'>"
                 f"<button type='submit' class='danger'>Clear</button></form></td></tr>"
             )
         body = f"""
-        <p class="hint">Thread ↔ Cursor <code>--resume</code> / OpenRouter session IDs (SQLite).</p>
+        <p class="hint">Thread ↔ Cursor <code>--resume</code> / OpenRouter session IDs (SQLite).
+        Clear deletes resume <em>and</em> <code>/model</code> override.</p>
         <div class="table-wrap">
           <table>
-            <tr><th>Key</th><th>Title</th><th>Session</th><th></th></tr>
-            {"".join(rows) or "<tr><td colspan=4><em>none</em></td></tr>"}
+            <tr><th>Key</th><th>Title</th><th>Session</th><th>Model</th><th></th></tr>
+            {"".join(rows) or "<tr><td colspan=5><em>none</em></td></tr>"}
           </table>
         </div>
         """
