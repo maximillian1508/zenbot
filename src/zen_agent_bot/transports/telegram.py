@@ -186,9 +186,9 @@ class TelegramAgentApp:
             return
         key = self._session_key(update.effective_chat.id, update.message.message_thread_id if update.message else None)  # type: ignore[union-attr]
         self.gateway.reset_session_resume(key)
-        await update.message.reply_text(
+        await update.message.reply_text(  # type: ignore[union-attr]
             "New session. Next message starts fresh. /model override is kept."
-        )  # type: ignore[union-attr]
+        )
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.effective_chat or not update.message:
@@ -312,6 +312,7 @@ class TelegramAgentApp:
             _chat_id: int = chat_id,
             _thread_id: int | None = thread_id,
             _status_id: int = status_id,
+            **_: object,
         ) -> None:
             await context.bot.edit_message_text(
                 chat_id=_chat_id,

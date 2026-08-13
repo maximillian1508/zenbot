@@ -163,11 +163,10 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 5. ~~**Claude Code backend**~~ ✅ — `claude -p`; set agent `default_backend` to `claude-cli` (needs host `claude` login)
 6. ~~**File attachments**~~ ✅ — Discord/Telegram files → `data/attachments/`; paths injected into prompt (images via Read; other files by path; 25 MiB / 10 files)
 
-**Done (out of prior P2):** OpenRouter chat backend; **model selection**.
+**Done (out of prior P2):** OpenRouter chat backend; **model selection**; **queue Send now** (Discord Stop & send + Drop).
 
 **P2 / Phase 2–3 (wanted)**
 
-- Queue Send now — Discord Stop & send + Drop on queued follow-ups
 - Session hygiene — prune stale SQLite mappings, `/close`, admin stale-sessions
 - Master slash dispatch — `/run <agent> …` from manager (keep 1-bot-per-profile primary)
 - OpenClaw-style bindings / channel→agent routing
@@ -204,7 +203,7 @@ Logs: `journalctl -u zen-agent-bot -f`, `data/logs/rebuild.log`, `journalctl -u 
 
 - `systemctl is-active zen-agent-bot` + Discord bots connect
 - Post in `#agent` → thread + streaming status + final reply
-- Follow-up while busy → queued message; then runs
+- Follow-up while busy → queued message + **Send now** / **Drop**; then runs
 - Admin: allowlist add/remove without restart
 - After code change: `/rebuild` or `sudo systemctl restart zen-agent-bot`; verify `/health`
 - `git push` works from agent jobs (host SSH keys)

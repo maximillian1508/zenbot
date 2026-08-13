@@ -102,7 +102,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 |---|---------|--------|
 | 4.1 | systemd unit + `Restart=on-failure` | 🟢 |
 | 4.2 | Job queue (max N concurrent agents) | 🟡 1d (partial ✅) |
-| 4.2b | Queue **Send now** button (Stop & send) | 🟡 0.5d | Discord + Drop |
+| 4.2b | Queue **Send now** button (Stop & send) | ✅ | Discord + Drop; Telegram later |
 | 4.3 | `/cancel` in chat | ✅ |
 | 4.3b | Graceful shutdown (`stop_grace_period` + SIGTERM) | ✅ |
 | 4.4 | Skills prefix (load `~/.cursor/skills/*/SKILL.md` by name) | 🟡 1d |
@@ -182,7 +182,7 @@ routing:
 6. ~~Claude Code backend (`claude -p`)~~ ✅
 7. ~~**File attachments**~~ ✅ — Discord/Telegram → `data/attachments/` + paths in prompt
 8. ~~**Model selection**~~ ✅ — admin fields + per-thread `/model` (session override; share plumbing with `/backend`)
-9. Queue “Send now” button (Discord Stop & send)
+9. ~~**Queue “Send now” button**~~ ✅ — Discord Stop & send (cancel in-flight, run this follow-up)
 10. Session hygiene (Phase 2/3) + master slash dispatch (Phase 2/3)
 11. cursor-sdk / cron / notifications / per-thread `/backend`
 
@@ -205,7 +205,7 @@ Locked from planning with Maxi — keep these when picking backlog work.
 
 **Done extras:** OpenRouter chat backend; Claude Code backend; file attachments (Discord/TG → `data/attachments/`, paths in prompt; 25 MiB / 10 files).
 
-**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · queue Send now button · session hygiene · master slash dispatch · bindings/routing · per-thread `/backend` · cursor-sdk · cron · job-done notify · OpenRouter.
+**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · ~~queue Send now button~~ ✅ · session hygiene · master slash dispatch · bindings/routing · per-thread `/backend` · cursor-sdk · cron · job-done notify · OpenRouter.
 
 ### Model selection (2026-08-13)
 
@@ -237,7 +237,7 @@ Locked from planning with Maxi — keep these when picking backlog work.
 
 ### Queue “Send now” (2026-08-13)
 
-**Planned.** Button on a **queued** follow-up = Cursor CLI **Stop & send** (2nd Enter / Cmd+Enter), not IDE “steer into the running turn”.
+**Shipped (Discord).** Button on a **queued** follow-up = Cursor CLI **Stop & send** (2nd Enter / Cmd+Enter), not IDE “steer into the running turn”.
 
 Today: follow-ups while busy sit in the per-thread queue until the current job finishes. `/cancel` stops the runner, then the next queued job starts.
 

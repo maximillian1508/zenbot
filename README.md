@@ -46,7 +46,7 @@ uv run zen-agent-bot
 | Action | How |
 |--------|-----|
 | **New task** | Post in the agent channel → bot creates a **thread** and runs Cursor agent |
-| **Follow-up** | Reply in the same thread (`--resume`). If a job is running, your message is **queued** until it finishes |
+| **Follow-up** | Reply in the same thread (`--resume`). If a job is running, your message is **queued** — **Send now** stops the current job and runs this one (Cursor Stop & send). **Drop** unqueues it |
 | **Attach files** | Drop images/docs in the thread (or with your message) — saved under `data/attachments/` and paths go into the prompt |
 | **Fresh session** | `/new` in the thread (keeps `/model` override) |
 | **Model** | `/model` lists Cursor CLI models · `/model composer-2.5` this thread · `/model clear` |

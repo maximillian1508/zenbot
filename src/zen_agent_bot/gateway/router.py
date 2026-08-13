@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,7 @@ from ..skills.loader import build_prompt
 from ..util.proc import terminate_process
 from ..util.rebuild import request_rebuild as write_rebuild_flag, rebuild_pending
 from ..util.throttle import ThrottledProgress
+from .queue import drop_by_id, promote_by_id, queued_count
 
 log = logging.getLogger(__name__)
 
@@ -42,19 +44,23 @@ class JobResult:
     exit_code: int
     session_id: str | None
     error: str | None = None
+    queued_job_id: str | None = None
 
 
 SendText = Callable[[str], Awaitable[None]]
-EditText = Callable[[str], Awaitable[None]]
+EditText = Callable[..., Awaitable[None]]
+_STOP = object()
 
 
 @dataclass
 class _QueuedJob:
+    job_id: str
     agent_id: str
     session_key: str
     user_prompt: str
     send: SendText
     edit_status: EditText
+    ready: bool = True
 
 
 @dataclass
@@ -146,7 +152,9 @@ def _interrupt_reason(error: str | None) -> str | None:
 
 @dataclass
 class _SessionState:
-    queue: asyncio.Queue[_QueuedJob | None]
+    pending: deque[Any] = field(default_factory=deque)
+    wake: asyncio.Event = field(default_factory=asyncio.Event)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     worker: asyncio.Task[None] | None = None
     busy: bool = False
     run_handle: _RunHandle | None = None
@@ -211,7 +219,7 @@ class Gateway:
         async with self._sessions_guard:
             state = self._sessions.get(session_key)
             if state is None:
-                state = _SessionState(queue=asyncio.Queue())
+                state = _SessionState()
                 self._sessions[session_key] = state
             if state.worker is None or state.worker.done():
                 state.worker = asyncio.create_task(
@@ -228,30 +236,45 @@ class Gateway:
         user_prompt: str,
         send: SendText,
         edit_status: EditText,
+        on_queued: Callable[[str], Awaitable[None]] | None = None,
     ) -> JobResult:
         if self._shutting_down:
             await edit_status("⚠️ Gateway is shutting down — try again after restart.")
             return JobResult(text="", exit_code=0, session_id=None)
 
         state = await self._ensure_session_worker(session_key)
-        ahead = state.queue.qsize() + (1 if state.busy else 0)
         job = _QueuedJob(
+            job_id=uuid.uuid4().hex[:12],
             agent_id=agent_id,
             session_key=session_key,
             user_prompt=user_prompt,
             send=send,
             edit_status=edit_status,
         )
-        await state.queue.put(job)
+        async with state.lock:
+            ahead = queued_count(state.pending, stop=_STOP) + (1 if state.busy else 0)
+            job.ready = ahead == 0
+            state.pending.append(job)
 
         if ahead > 0:
             plural = "s" if ahead > 1 else ""
             await edit_status(
                 f"📋 **Queued** ({ahead} message{plural} ahead — "
-                "runs when the current job in this thread finishes)"
+                "runs when the current job in this thread finishes, "
+                "or tap **Send now** to stop it)"
             )
-            return JobResult(text="", exit_code=0, session_id=None)
+            if on_queued is not None:
+                try:
+                    await on_queued(job.job_id)
+                except Exception:
+                    log.exception("Failed to attach queue controls for %s", job.job_id)
+            job.ready = True
+            state.wake.set()
+            return JobResult(
+                text="", exit_code=0, session_id=None, queued_job_id=job.job_id
+            )
 
+        state.wake.set()
         return JobResult(text="", exit_code=0, session_id=None)
 
     async def cancel_session(self, session_key: str) -> bool:
@@ -259,6 +282,45 @@ class Gateway:
         if state is None or not state.busy or state.run_handle is None:
             return False
         await state.run_handle.cancel("stopped by /cancel")
+        return True
+
+    async def send_now(self, session_key: str, job_id: str) -> str:
+        """Stop & send: promote this queued job and cancel the in-flight run."""
+        state = self._sessions.get(session_key)
+        if state is None:
+            return "missing"
+        async with state.lock:
+            job = promote_by_id(state.pending, job_id)
+        if job is None or not isinstance(job, _QueuedJob):
+            return "missing"
+        job.ready = True
+        state.wake.set()
+        try:
+            await job.edit_status(
+                "⏭ **Sending now** — stopping the current job…",
+                view=None,
+            )
+        except Exception:
+            log.exception("Failed to update queued status for send-now %s", job_id)
+        if state.busy and state.run_handle is not None:
+            await state.run_handle.cancel(
+                "stopped by Send now (queued follow-up)"
+            )
+            return "cancelled"
+        return "promoted"
+
+    async def drop_queued(self, session_key: str, job_id: str) -> bool:
+        state = self._sessions.get(session_key)
+        if state is None:
+            return False
+        async with state.lock:
+            job = drop_by_id(state.pending, job_id)
+        if job is None or not isinstance(job, _QueuedJob):
+            return False
+        try:
+            await job.edit_status("🗑 Dropped from queue.", view=None)
+        except Exception:
+            log.exception("Failed to update dropped status for %s", job_id)
         return True
 
     async def shutdown(self, grace_sec: float = 180.0) -> None:
@@ -291,21 +353,40 @@ class Gateway:
 
         for state in self._sessions.values():
             if state.worker is not None and not state.worker.done():
-                await state.queue.put(None)
+                async with state.lock:
+                    state.pending.append(_STOP)
+                state.wake.set()
 
         log.info("Gateway shutdown complete")
+
+    async def _next_job(self, state: _SessionState) -> _QueuedJob | None:
+        while True:
+            async with state.lock:
+                while state.pending:
+                    item = state.pending[0]
+                    if item is _STOP:
+                        state.pending.popleft()
+                        return None
+                    if isinstance(item, _QueuedJob):
+                        if not item.ready:
+                            break
+                        state.pending.popleft()
+                        return item
+                    state.pending.popleft()
+                state.wake.clear()
+            await state.wake.wait()
 
     async def _session_worker(self, session_key: str) -> None:
         state = self._sessions[session_key]
         while True:
-            job = await state.queue.get()
+            job = await self._next_job(state)
             if job is None:
-                state.queue.task_done()
                 break
             if self._shutting_down:
-                state.queue.task_done()
                 try:
-                    await job.edit_status("⚠️ Skipped — gateway shutting down.")
+                    await job.edit_status(
+                        "⚠️ Skipped — gateway shutting down.", view=None
+                    )
                 except Exception:
                     log.exception("Failed to update status for %s", session_key)
                 continue
@@ -329,7 +410,7 @@ class Gateway:
                     error=str(exc),
                 )
                 try:
-                    await job.edit_status("❌ Internal error — check logs.")
+                    await job.edit_status("❌ Internal error — check logs.", view=None)
                 except Exception:
                     log.exception("Failed to update status for %s", session_key)
             finally:
@@ -338,11 +419,10 @@ class Gateway:
                 state.current_agent_id = None
                 state.current_prompt = None
                 state.started_at = None
-                state.queue.task_done()
 
     async def _execute_job(self, job: _QueuedJob) -> JobResult:
         state = self._sessions[job.session_key]
-        await job.edit_status("⏳ Agent running…")
+        await job.edit_status("⏳ Agent running…", view=None)
 
         profile = self.agents.get(job.agent_id)
         sess = self.store.get(job.session_key)
@@ -633,7 +713,7 @@ class Gateway:
         running: list[dict[str, Any]] = []
         queued: list[dict[str, Any]] = []
         for key, state in self._sessions.items():
-            qsize = state.queue.qsize()
+            qsize = queued_count(state.pending, stop=_STOP)
             if state.busy:
                 started = state.started_at or time.time()
                 running.append(

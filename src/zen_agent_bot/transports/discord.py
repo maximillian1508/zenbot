@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -26,6 +26,57 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 DISCORD_CHUNK = 1900
+
+
+class QueueJobView(discord.ui.View):
+    """Stop & send / drop controls on a queued follow-up status message."""
+
+    def __init__(self, gateway: Gateway, session_key: str, job_id: str) -> None:
+        super().__init__(timeout=None)
+        self.gateway = gateway
+        self.session_key = session_key
+        self.job_id = job_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user and self.gateway.is_allowed(interaction.user.id):
+            return True
+        if interaction.response.is_done():
+            await interaction.followup.send("Not authorized.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Not authorized.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Send now", style=discord.ButtonStyle.primary)
+    async def send_now(
+        self, interaction: discord.Interaction, button: discord.ui.Button[Any]
+    ) -> None:
+        await interaction.response.defer()
+        result = await self.gateway.send_now(self.session_key, self.job_id)
+        if result == "missing":
+            await interaction.followup.send(
+                "Already started or dropped.", ephemeral=True
+            )
+            try:
+                await interaction.message.edit(view=None)
+            except discord.HTTPException:
+                pass
+            self.stop()
+
+    @discord.ui.button(label="Drop", style=discord.ButtonStyle.secondary)
+    async def drop(
+        self, interaction: discord.Interaction, button: discord.ui.Button[Any]
+    ) -> None:
+        await interaction.response.defer()
+        ok = await self.gateway.drop_queued(self.session_key, self.job_id)
+        if not ok:
+            await interaction.followup.send(
+                "Already started or dropped.", ephemeral=True
+            )
+            try:
+                await interaction.message.edit(view=None)
+            except discord.HTTPException:
+                pass
+        self.stop()
 
 
 async def send_chunks(target: Messageable, text: str) -> None:
@@ -382,9 +433,19 @@ class AgentDiscordBot(discord.Client):
             await send_chunks_reply(_status, text_out)
 
         async def edit_status(
-            text_out: str, *, _status: discord.Message = status_msg
+            text_out: str,
+            *,
+            view: discord.ui.View | None = discord.utils.MISSING,  # type: ignore[assignment]
+            _status: discord.Message = status_msg,
         ) -> None:
-            await _status.edit(content=text_out)
+            kwargs: dict[str, Any] = {"content": text_out[:2000]}
+            if view is not discord.utils.MISSING:
+                kwargs["view"] = view
+            await _status.edit(**kwargs)
+
+        async def on_queued(job_id: str, *, _status: discord.Message = status_msg) -> None:
+            qview = QueueJobView(self.gateway, sess_key, job_id)
+            await _status.edit(view=qview)
 
         asyncio.create_task(
             self.gateway.run_job(
@@ -393,6 +454,7 @@ class AgentDiscordBot(discord.Client):
                 user_prompt=prompt,
                 send=send,
                 edit_status=edit_status,
+                on_queued=on_queued,
             ),
             name=f"agent-{sess_key}",
         )
