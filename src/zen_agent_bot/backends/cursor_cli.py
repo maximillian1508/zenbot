@@ -321,12 +321,9 @@ class CursorCliBackend:
                     phase = "thinking"
                     await on_progress(_format_progress(phase=phase, text=assistant_text))
                 elif etype == "assistant":
-                    chunk = _assistant_text(event)
-                    if chunk and _is_streaming_delta(event):
-                        # --stream-partial-output: only timestamp_ms without
-                        # model_call_id is new text; other assistant events are
-                        # duplicate flushes (see Cursor output-format docs).
-                        assistant_text += chunk
+                    merged = _apply_assistant_event(assistant_text, event)
+                    if merged is not None:
+                        assistant_text = merged
                         phase = "writing"
                         await on_progress(_format_progress(phase=phase, text=assistant_text))
                 elif etype in ("tool_call", "tool", "function_call"):
@@ -404,9 +401,38 @@ class CursorCliBackend:
         )
 
 
+# Thought-sized flushes (not token deltas) that Cursor sometimes re-emits
+# with the same timestamp_ms / no model_call_id shape as real deltas.
+_DUP_FLUSH_MIN_CHARS = 24
+
+
 def _is_streaming_delta(event: dict) -> bool:
     """True only for real-time --stream-partial-output deltas (not duplicate flushes)."""
     return bool(event.get("timestamp_ms")) and not event.get("model_call_id")
+
+
+def _merge_assistant_delta(current: str, chunk: str) -> str:
+    """Append a stream delta; drop last-thought replays and cumulative snapshots."""
+    if not chunk:
+        return current
+    if not current:
+        return chunk
+    if len(chunk) >= _DUP_FLUSH_MIN_CHARS and current.endswith(chunk):
+        return current
+    if len(chunk) > len(current) and chunk.startswith(current):
+        return chunk
+    return current + chunk
+
+
+def _apply_assistant_event(current: str, event: dict) -> str | None:
+    """Return updated text, or None when the event is a duplicate / non-delta."""
+    chunk = _assistant_text(event)
+    if not chunk or not _is_streaming_delta(event):
+        return None
+    merged = _merge_assistant_delta(current, chunk)
+    if merged == current:
+        return None
+    return merged
 
 
 def _assistant_text(event: dict) -> str:
