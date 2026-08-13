@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,8 +18,15 @@ from ..attachments import (
     merge_prompt_with_attachments,
     write_attachment,
 )
-from ..gateway.router import Gateway, title_from_prompt
+from ..gateway.router import Gateway, JobResult, title_from_prompt
+from ..handoff import (
+    HANDOFF_MAX_MESSAGES,
+    HandoffError,
+    format_handoff_prompt,
+    format_transcript_lines,
+)
 from ..notify import format_close_reply
+from ..scheduler import cron_prompt
 from ..sessions import ThreadSession
 
 if TYPE_CHECKING:
@@ -27,6 +35,76 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 DISCORD_CHUNK = 1900
+
+
+def allowlist_mentions(user_ids: list[int]) -> str | None:
+    ids = [int(i) for i in user_ids if i]
+    if not ids:
+        return None
+    return " ".join(f"<@{i}>" for i in ids)
+
+
+async def start_public_thread(
+    home: discord.TextChannel,
+    *,
+    name: str,
+    starter: str,
+    add_user_ids: list[int] | None = None,
+) -> discord.Thread:
+    """Public thread from a home-channel message so it shows in the channel list."""
+    msg = await home.send(starter[:2000])
+    thread = await msg.create_thread(name=name[:100], auto_archive_duration=10080)
+    for uid in add_user_ids or []:
+        try:
+            await thread.add_user(discord.Object(id=int(uid)))
+        except discord.HTTPException as exc:
+            log.warning("Could not add user %s to thread %s: %s", uid, thread.id, exc)
+    return thread
+
+
+class AskManagerView(discord.ui.View):
+    """One-click handoff to the manager from a specialist / General thread."""
+
+    def __init__(self, bot: AgentDiscordBot) -> None:
+        super().__init__(timeout=3600)
+        self.bot = bot
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user and self.bot.gateway.is_allowed(interaction.user.id):
+            return True
+        if interaction.response.is_done():
+            await interaction.followup.send("Not authorized.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Not authorized.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Ask Manager", style=discord.ButtonStyle.primary)
+    async def ask_manager(
+        self, interaction: discord.Interaction, button: discord.ui.Button[Any]
+    ) -> None:
+        await interaction.response.defer()
+        manager = self.bot.gateway.agents.manager()
+        if manager is None:
+            await interaction.followup.send("No manager profile configured.", ephemeral=True)
+            return
+        try:
+            thread = await self.bot.handoff_from_channel(
+                source=interaction.channel,
+                target=manager,
+                author=interaction.user,
+                note="",
+            )
+        except HandoffError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        try:
+            await interaction.message.edit(view=None)
+        except discord.HTTPException:
+            pass
+        self.stop()
+        await interaction.followup.send(
+            f"Handed off to **{manager.display_name}** → {thread.mention}"
+        )
 
 
 class QueueJobView(discord.ui.View):
@@ -105,6 +183,35 @@ async def send_chunks_reply(status_msg: discord.Message, text: str) -> None:
         start += DISCORD_CHUNK
 
 
+_AGENT_PAREN_ID = re.compile(r"\(([^)]+)\)\s*$")
+
+
+def resolve_agent_name(raw: str, profiles: list[AgentProfile]) -> AgentProfile | None:
+    """Match id, display name, or Discord autocomplete label (`Name (id)`)."""
+    key = (raw or "").strip()
+    if not key:
+        return None
+    lowered = key.lower()
+    by_id = {p.id.lower(): p for p in profiles}
+    if lowered in by_id:
+        return by_id[lowered]
+    m = _AGENT_PAREN_ID.search(key)
+    if m:
+        inner = m.group(1).strip().lower()
+        if inner in by_id:
+            return by_id[inner]
+    for sep in (" — ", " · ", " - "):
+        if sep in key:
+            head = key.split(sep, 1)[0].strip().lower()
+            if head in by_id:
+                return by_id[head]
+            break
+    for profile in profiles:
+        if profile.display_name.strip().lower() == lowered:
+            return profile
+    return None
+
+
 RESERVED_SLASH = frozenset(
     {
         "new",
@@ -116,6 +223,8 @@ RESERVED_SLASH = frozenset(
         "agents",
         "rebuild",
         "run",
+        "schedule",
+        "handoff",
     }
 )
 
@@ -135,6 +244,18 @@ async def archive_agent_thread(channel: object) -> bool:
         return True
     except discord.HTTPException:
         log.warning("Failed to archive thread %s", getattr(channel, "id", "?"))
+        return False
+
+
+async def unarchive_agent_thread(channel: object) -> bool:
+    """Unarchive so we can reply. Returns True if it was archived and is now open."""
+    if not isinstance(channel, discord.Thread) or not channel.archived:
+        return False
+    try:
+        await channel.edit(archived=False, reason="/close reply")
+        return True
+    except discord.HTTPException:
+        log.warning("Failed to unarchive thread %s", getattr(channel, "id", "?"))
         return False
 
 
@@ -307,6 +428,98 @@ class AgentDiscordBot(discord.Client):
             return None
         return fetched if isinstance(fetched, discord.TextChannel) else None
 
+    def _resolve_agent(self, raw: str) -> AgentProfile | None:
+        found = resolve_agent_name(raw, self.profiles)
+        if found is not None:
+            return found
+        return resolve_agent_name(raw, self.gateway.agents.all())
+
+    def _agent_choices(self, current: str) -> list[app_commands.Choice[str]]:
+        q = current.lower().strip()
+        out: list[app_commands.Choice[str]] = []
+        for profile in self.profiles:
+            hay = f"{profile.id} {profile.display_name}".lower()
+            if q and q not in hay:
+                continue
+            out.append(
+                app_commands.Choice(
+                    name=f"{profile.display_name} ({profile.id})"[:100],
+                    value=profile.id[:100],
+                )
+            )
+            if len(out) >= 25:
+                break
+        return out
+
+    async def _thread_transcript(self, thread: discord.Thread) -> str:
+        rows: list[tuple[str, str]] = []
+        async for msg in thread.history(limit=HANDOFF_MAX_MESSAGES, oldest_first=False):
+            content = (msg.content or "").strip()
+            if not content or content.startswith("⏳ Agent running"):
+                continue
+            name = msg.author.display_name if msg.author else "unknown"
+            if msg.author and msg.author.bot:
+                name = f"{name} [bot]"
+            rows.append((name, content))
+        rows.reverse()
+        return format_transcript_lines(rows)
+
+    async def handoff_from_channel(
+        self,
+        *,
+        source: object,
+        target: AgentProfile,
+        author: discord.abc.User,
+        note: str,
+    ) -> discord.Thread:
+        if not isinstance(source, discord.Thread):
+            raise HandoffError("Use `/handoff` inside a thread (the one you want to pass on).")
+        if target.discord is None:
+            raise HandoffError(f"**{target.display_name}** has no Discord channel.")
+        await unarchive_agent_thread(source)
+        home = await self._home_channel(target)
+        if home is None:
+            raise HandoffError(
+                f"Can't open **{target.display_name}**'s home channel "
+                f"(id `{target.discord.agent_channel_id}`)."
+            )
+        source_profile = self._profile_for_channel(source)
+        source_agent = source_profile.id if source_profile else "unknown"
+        source_title = source.name or "(untitled)"
+        source_url = str(getattr(source, "jump_url", "") or "")
+        transcript = await self._thread_transcript(source)
+        prompt = format_handoff_prompt(
+            source_agent=source_agent,
+            source_title=source_title,
+            source_url=source_url,
+            target_display=target.display_name,
+            note=note,
+            transcript=transcript,
+        )
+        title_src = note.strip() or source_title
+        title = title_from_prompt(f"handoff · {title_src}")
+        starter = (
+            f"↪️ **Handoff** from {source.mention} → **{target.display_name}** "
+            f"{author.mention}"
+        )
+        ids = [author.id]
+        thread = await start_public_thread(
+            home, name=title, starter=starter, add_user_ids=ids
+        )
+        extra = "…" if len(prompt) > 500 else ""
+        await thread.send(f"{prompt[:500]}{extra}")
+        sess_key = self.gateway.session_key(target.id, "discord", thread_key(thread))
+        self.gateway.store.set(sess_key, ThreadSession(session_id=None, title=title))
+        status_msg = await thread.send("⏳ Agent running…")
+        self._launch_job(
+            profile=target,
+            sess_key=sess_key,
+            prompt=prompt,
+            status_msg=status_msg,
+            mention=getattr(author, "mention", None),
+        )
+        return thread
+
     def _launch_job(
         self,
         *,
@@ -315,6 +528,8 @@ class AgentDiscordBot(discord.Client):
         prompt: str,
         status_msg: discord.Message,
         mention: str | None,
+        schedule_id: str | None = None,
+        on_done: Any = None,
     ) -> None:
         async def send(text_out: str, *, _status: discord.Message = status_msg) -> None:
             await send_chunks_reply(_status, text_out)
@@ -334,6 +549,10 @@ class AgentDiscordBot(discord.Client):
             qview = QueueJobView(self.gateway, sess_key, job_id)
             await _status.edit(view=qview)
 
+        done_view = None
+        if not profile.is_manager and self.has_manager:
+            done_view = AskManagerView(self)
+
         asyncio.create_task(
             self.gateway.run_job(
                 agent_id=profile.id,
@@ -343,6 +562,9 @@ class AgentDiscordBot(discord.Client):
                 edit_status=edit_status,
                 on_queued=on_queued,
                 notify_mention=mention,
+                schedule_id=schedule_id,
+                on_done=on_done,
+                done_view=done_view,
             ),
             name=f"agent-{sess_key}",
         )
@@ -390,6 +612,63 @@ class AgentDiscordBot(discord.Client):
         )
         return thread
 
+    async def launch_cron_run(
+        self,
+        *,
+        agent_id: str,
+        schedule_id: str,
+        name: str,
+        prompt: str,
+        cron_expr: str,
+    ) -> dict[str, str | None]:
+        if not self.is_ready():
+            raise RuntimeError("Discord client not ready")
+        profile = self.by_id.get(agent_id)
+        if profile is None or profile.discord is None:
+            raise RuntimeError(f"Agent {agent_id} has no Discord binding on this bot")
+        home = await self._home_channel(profile)
+        if home is None:
+            raise RuntimeError(f"Home channel missing for {agent_id}")
+        title = title_from_prompt(f"cron · {name}")
+        ids = self.gateway.config.db.allowlist()
+        mention = allowlist_mentions(ids)
+        starter = f"⏰ **Scheduled** `{name}` · `{cron_expr}`"
+        if mention:
+            starter = f"{starter} {mention}"
+        thread = await start_public_thread(
+            home, name=title, starter=starter, add_user_ids=ids
+        )
+        body = prompt.strip()
+        extra = "…" if len(body) > 500 else ""
+        await thread.send(
+            f"⏰ **Scheduled** `{name}` · `{schedule_id}` · `{cron_expr}`\n\n"
+            f"{body[:500]}{extra}"
+        )
+        sess_key = self.gateway.session_key(profile.id, "discord", thread_key(thread))
+        self.gateway.store.set(sess_key, ThreadSession(session_id=None, title=title))
+        status_msg = await thread.send("⏳ Agent running…")
+
+        async def _on_done(result: JobResult, sid: str = schedule_id) -> None:
+            sched = self.gateway.scheduler
+            if sched is not None:
+                sched.on_job_done(sid, result)
+
+        self._launch_job(
+            profile=profile,
+            sess_key=sess_key,
+            prompt=cron_prompt(name=name, cron_expr=cron_expr, prompt=prompt),
+            status_msg=status_msg,
+            mention=mention,
+            schedule_id=schedule_id,
+            on_done=_on_done,
+        )
+        url = getattr(thread, "jump_url", None)
+        return {
+            "thread_id": str(thread.id),
+            "session_key": sess_key,
+            "thread_url": str(url) if url else None,
+        }
+
     async def _slash_start(
         self,
         interaction: discord.Interaction,
@@ -433,6 +712,9 @@ class AgentDiscordBot(discord.Client):
         )
 
     async def setup_hook(self) -> None:
+        for profile in self.profiles:
+            self.gateway.register_cron_launcher(profile.id, self.launch_cron_run)
+
         @self.tree.command(name="new", description="Start a fresh agent session in this thread")
         async def cmd_new(interaction: discord.Interaction) -> None:
             ctx = await self._require_ctx(interaction)
@@ -495,16 +777,26 @@ class AgentDiscordBot(discord.Client):
             if ctx is None:
                 return
             profile, channel = ctx
+            # Discord 50083: cannot respond to an archived thread. Unarchive
+            # first, reply, then archive — never archive before the ack.
+            await unarchive_agent_thread(channel)
+            try:
+                await interaction.response.defer()
+            except discord.HTTPException:
+                log.exception("Failed to defer /close (thread archived?)")
+                return
             key = self.gateway.session_key(profile.id, "discord", thread_key(channel))
             info = await self.gateway.close_session(key)
-            archived = await archive_agent_thread(channel)
-            await interaction.response.send_message(
+            will_archive = isinstance(channel, discord.Thread)
+            await interaction.followup.send(
                 format_close_reply(
                     cancelled=bool(info["cancelled"]),
                     dropped=int(info["dropped"]),
-                    archived=archived,
+                    archived=will_archive,
                 )
             )
+            if will_archive:
+                await archive_agent_thread(channel)
 
         @self.tree.command(
             name="model",
@@ -616,16 +908,13 @@ class AgentDiscordBot(discord.Client):
         async def cmd_run(
             interaction: discord.Interaction, agent: str, prompt: str
         ) -> None:
-            target = self.by_id.get(agent.strip().lower())
+            target = self._resolve_agent(agent)
             if target is None:
-                try:
-                    target = self.gateway.agents.get(agent.strip().lower())
-                except KeyError:
-                    await interaction.response.send_message(
-                        f"Unknown agent `{agent}`. Try `/agents`.",
-                        ephemeral=True,
-                    )
-                    return
+                await interaction.response.send_message(
+                    f"Unknown agent `{agent}`. Try `/agents`.",
+                    ephemeral=True,
+                )
+                return
             await self._slash_start(interaction, target, prompt)
 
         @cmd_run.autocomplete("agent")
@@ -634,21 +923,53 @@ class AgentDiscordBot(discord.Client):
         ) -> list[app_commands.Choice[str]]:
             if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
                 return []
-            q = current.lower().strip()
-            out: list[app_commands.Choice[str]] = []
-            for profile in self.profiles:
-                hay = f"{profile.id} {profile.display_name}".lower()
-                if q and q not in hay:
-                    continue
-                out.append(
-                    app_commands.Choice(
-                        name=f"{profile.display_name} ({profile.id})"[:100],
-                        value=profile.id[:100],
-                    )
+            return self._agent_choices(current)
+
+        @self.tree.command(
+            name="handoff",
+            description="Send this thread to another agent (pick who continues)",
+        )
+        @app_commands.describe(
+            agent="Who should continue (manager, general, music, …)",
+            note="Optional extra instruction for them",
+        )
+        async def cmd_handoff(
+            interaction: discord.Interaction,
+            agent: str,
+            note: str | None = None,
+        ) -> None:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                await interaction.response.send_message("Not authorized.", ephemeral=True)
+                return
+            target = self._resolve_agent(agent)
+            if target is None:
+                await interaction.response.send_message(
+                    f"Unknown agent `{agent}`. Try `/agents`.",
+                    ephemeral=True,
                 )
-                if len(out) >= 25:
-                    break
-            return out
+                return
+            await interaction.response.defer()
+            try:
+                thread = await self.handoff_from_channel(
+                    source=interaction.channel,
+                    target=target,
+                    author=interaction.user,
+                    note=note or "",
+                )
+            except HandoffError as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            await interaction.followup.send(
+                f"Handed off to **{target.display_name}** → {thread.mention}"
+            )
+
+        @cmd_handoff.autocomplete("agent")
+        async def handoff_autocomplete(
+            interaction: discord.Interaction, current: str
+        ) -> list[app_commands.Choice[str]]:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                return []
+            return self._agent_choices(current)
 
         for profile in self.profiles:
             slug = profile.id.strip().lower()
@@ -669,6 +990,52 @@ class AgentDiscordBot(discord.Client):
             )(_make_alias(profile))
 
         if self.has_manager:
+
+            @self.tree.command(
+                name="schedule",
+                description="List cron schedules, or run one now",
+            )
+            @app_commands.describe(
+                action="list (default) or run",
+                id="Schedule id (for run)",
+            )
+            async def cmd_schedule(
+                interaction: discord.Interaction,
+                action: str | None = None,
+                id: str | None = None,
+            ) -> None:
+                if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                    await interaction.response.send_message("Not authorized.", ephemeral=True)
+                    return
+                verb = (action or "list").strip().lower()
+                if verb in ("", "list", "ls"):
+                    await interaction.response.send_message(
+                        self.gateway.schedules_markdown(),
+                        ephemeral=True,
+                    )
+                    return
+                if verb != "run":
+                    await interaction.response.send_message(
+                        "Use `/schedule` or `/schedule action:run id:<id>`.",
+                        ephemeral=True,
+                    )
+                    return
+                sid = (id or "").strip()
+                if not sid:
+                    await interaction.response.send_message(
+                        "Pass `id` of the schedule to run.",
+                        ephemeral=True,
+                    )
+                    return
+                sched = self.gateway.scheduler
+                if sched is None:
+                    await interaction.response.send_message(
+                        "Scheduler is not running.", ephemeral=True
+                    )
+                    return
+                await interaction.response.defer(ephemeral=True)
+                result = await sched.fire(sid, force=True)
+                await interaction.followup.send(f"Schedule `{sid}`: **{result}**")
 
             @self.tree.command(name="agents", description="List configured agent profiles")
             async def cmd_agents(interaction: discord.Interaction) -> None:
@@ -701,6 +1068,30 @@ class AgentDiscordBot(discord.Client):
                     "Restart requested. Host will `systemctl restart` in ~15s "
                     f"(flag `{path.name}`). Ping this thread after `/health` is OK."
                 )
+
+        @self.tree.error
+        async def on_app_command_error(
+            interaction: discord.Interaction,
+            error: app_commands.AppCommandError,
+        ) -> None:
+            log.exception(
+                "Slash command %s failed",
+                getattr(interaction.command, "name", "?"),
+            )
+            hint = "Command failed — check gateway logs."
+            err = str(error).lower()
+            if "50083" in err or "archived" in err:
+                hint = (
+                    "This thread is archived. Send a message here to unarchive, "
+                    "then retry the command."
+                )
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(hint, ephemeral=True)
+                else:
+                    await interaction.response.send_message(hint, ephemeral=True)
+            except Exception:
+                log.exception("Failed to report slash error to Discord")
 
         # Commands are registered as global on the tree. sync(guild=…) only
         # pushes guild-scoped commands (we have none) and leaves globals stale —

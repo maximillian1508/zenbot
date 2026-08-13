@@ -10,6 +10,7 @@ from telegram.ext import Application
 
 from .config import load_config
 from .gateway import Gateway
+from .scheduler import CronScheduler
 from .store import ConfigStore
 from .transports.discord import AgentDiscordBot, run_discord_bots
 from .transports.telegram import run_telegram_bots
@@ -86,6 +87,8 @@ async def run_gateway() -> None:
     discord_clients: list[AgentDiscordBot] = []
     telegram_apps: list[Application] = []
     admin_servers: list[uvicorn.Server] = []
+    scheduler = CronScheduler(gateway)
+    gateway.scheduler = scheduler
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -118,6 +121,9 @@ async def run_gateway() -> None:
                 name="admin",
             )
         )
+    tasks.append(
+        asyncio.create_task(scheduler.run(shutdown_event), name="cron")
+    )
 
     shutdown_task = asyncio.create_task(
         _shutdown_services(

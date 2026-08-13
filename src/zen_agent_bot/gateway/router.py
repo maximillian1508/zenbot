@@ -30,6 +30,7 @@ from ..model_select import (
     resolve_model,
 )
 from ..notify import append_status_line, format_job_done_ping, should_ping_done
+from ..schedule import format_schedules_markdown
 from ..sessions import SessionStore, ThreadSession
 from ..skills.loader import build_prompt
 from ..util.proc import terminate_process
@@ -71,6 +72,9 @@ class _QueuedJob:
     edit_status: EditText
     ready: bool = True
     notify_mention: str | None = None
+    schedule_id: str | None = None
+    on_done: Callable[["JobResult"], Awaitable[None]] | None = None
+    done_view: object | None = None
 
 
 @dataclass
@@ -170,6 +174,7 @@ class _SessionState:
     run_handle: _RunHandle | None = None
     current_agent_id: str | None = None
     current_prompt: str | None = None
+    current_schedule_id: str | None = None
     started_at: float | None = None
 
 
@@ -194,9 +199,26 @@ class Gateway:
         self._last_errors: deque[_ErrorRecord] = deque(maxlen=20)
         self._agent_status_cache: tuple[float, str] | None = None
         self._cursor_models_cache: tuple[float, list[tuple[str, str]]] | None = None
+        self._cron_launchers: dict[str, Callable[..., Awaitable[dict[str, str | None]]]] = {}
+        self.scheduler: Any = None
 
     def session_key(self, agent_id: str, transport: str, channel_id: str | int) -> str:
         return f"{agent_id}:{transport}:{channel_id}"
+
+    def register_cron_launcher(
+        self,
+        agent_id: str,
+        fn: Callable[..., Awaitable[dict[str, str | None]]],
+    ) -> None:
+        self._cron_launchers[agent_id] = fn
+
+    def cron_launcher(
+        self, agent_id: str
+    ) -> Callable[..., Awaitable[dict[str, str | None]]] | None:
+        return self._cron_launchers.get(agent_id)
+
+    def schedules_markdown(self) -> str:
+        return format_schedules_markdown(self.config.db.list_schedules())
 
     def is_allowed(self, user_id: int) -> bool:
         return self.config.db.is_allowed(user_id)
@@ -239,7 +261,9 @@ class Gateway:
         lines.append("")
         lines.append(
             "One Discord bot. `/music`, `/general`, `/manager` (or `/run`) open a "
-            "thread in that agent's channel. Plain messages in `#agent` are manager."
+            "thread in that agent's channel. `/handoff` picks who continues a thread; "
+            "non-manager jobs get an **Ask Manager** button. Plain messages in `#agent` "
+            "are manager."
         )
         return "\n".join(lines)
 
@@ -266,6 +290,9 @@ class Gateway:
         edit_status: EditText,
         on_queued: Callable[[str], Awaitable[None]] | None = None,
         notify_mention: str | None = None,
+        schedule_id: str | None = None,
+        on_done: Callable[[JobResult], Awaitable[None]] | None = None,
+        done_view: object | None = None,
     ) -> JobResult:
         if self._shutting_down:
             await edit_status("⚠️ Gateway is shutting down — try again after restart.")
@@ -280,6 +307,9 @@ class Gateway:
             send=send,
             edit_status=edit_status,
             notify_mention=notify_mention,
+            schedule_id=schedule_id,
+            on_done=on_done,
+            done_view=done_view,
         )
         async with state.lock:
             ahead = queued_count(state.pending, stop=_STOP) + (1 if state.busy else 0)
@@ -453,6 +483,7 @@ class Gateway:
             state.busy = True
             state.current_agent_id = job.agent_id
             state.current_prompt = job.user_prompt
+            state.current_schedule_id = job.schedule_id
             state.started_at = time.time()
             result: JobResult | None = None
             try:
@@ -479,15 +510,20 @@ class Gateway:
                         state,
                         result,
                         "❌ Internal error — check logs.",
-                        view=None,
                     )
                 except Exception:
                     log.exception("Failed to update status for %s", session_key)
             finally:
+                if job.on_done is not None and result is not None:
+                    try:
+                        await job.on_done(result)
+                    except Exception:
+                        log.exception("schedule on_done failed for %s", job.job_id)
                 state.busy = False
                 state.run_handle = None
                 state.current_agent_id = None
                 state.current_prompt = None
+                state.current_schedule_id = None
                 state.started_at = None
 
     def _done_ping_line(
@@ -527,13 +563,11 @@ class Gateway:
         state: _SessionState,
         result: JobResult,
         status: str,
-        *,
-        view: object | None = None,
     ) -> None:
         ping = self._done_ping_line(job, state, result)
         if ping:
             status = append_status_line(status, ping)
-        await job.edit_status(status, view=view)
+        await job.edit_status(status, view=job.done_view)
 
     async def _execute_job(self, job: _QueuedJob) -> JobResult:
         state = self._sessions[job.session_key]
@@ -887,6 +921,7 @@ class Gateway:
                         "started_at": started,
                         "elapsed_sec": round(time.time() - started, 1),
                         "prompt_preview": title_from_prompt(state.current_prompt or ""),
+                        "schedule_id": state.current_schedule_id,
                         "queue_behind": qsize,
                         "pid": (
                             state.run_handle.proc.pid

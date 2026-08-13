@@ -15,6 +15,15 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
+from ..schedule import (
+    DEFAULT_TZ,
+    MAX_NAME,
+    MAX_PROMPT,
+    next_run_iso,
+    slug_id,
+    validate_cron,
+    validate_timezone,
+)
 from ..store import ConfigStore
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -138,7 +147,7 @@ pre {
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
 }
 label { display: block; margin: 0.75rem 0; font-weight: 550; font-size: 0.92rem; }
-input[type=text], input[type=password], textarea {
+input[type=text], input[type=password], textarea, select {
   display: block; width: 100%; max-width: 36rem; margin-top: 0.35rem;
   padding: 0.55rem 0.7rem; border: 1px solid var(--border); border-radius: 8px;
   font: inherit; background: var(--surface);
@@ -157,7 +166,7 @@ button.danger {
   background: #fff; color: #b91c1c; border-color: #fecaca;
 }
 button:hover, .btn:hover { filter: brightness(0.97); }
-.row-actions { display: flex; gap: 0.4rem; align-items: center; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
 .job-cards { display: none; gap: 0.75rem; margin: 0.75rem 0 1.25rem; }
 .job-card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -354,6 +363,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
       <h3 class="section">Manage</h3>
       <div class="settings-links">
         <a href="/agents">Agents<span>Profiles, Discord/Telegram tokens &amp; channels</span></a>
+        <a href="/schedules">Schedules<span>Cron jobs — each run opens a Discord thread</span></a>
         <a href="/allowlist">Allowlist<span>Who can message the bots</span></a>
         <a href="/secrets">Secrets<span>API keys &amp; bot tokens (masked)</span></a>
       </div>
@@ -445,6 +455,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         links = [
             ("/", "Dashboard", "dashboard"),
             ("/status", "Status", "status"),
+            ("/schedules", "Schedules", "schedules"),
             ("/sessions", "Sessions", "sessions"),
         ]
         nav_parts = []
@@ -507,6 +518,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         agents = db.list_agent_rows()
         allowed = db.allowlist()
         sessions = db.list_sessions()
+        schedules = db.list_schedules()
         tg_ready = sum(1 for a in agents if a.get("telegram_token_env"))
         pw = _admin_password(db)
         running = queued = 0
@@ -543,6 +555,8 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             <div class="value"><a href="/allowlist">{len(allowed)}</a></div></div>
           <div class="card"><span class="label">Sessions</span>
             <div class="value"><a href="/sessions">{len(sessions)}</a></div></div>
+          <div class="card"><span class="label">Schedules</span>
+            <div class="value"><a href="/schedules">{len(schedules)}</a></div></div>
           <div class="card"><span class="label">Running</span>
             <div class="value"><a href="/status">{running}</a></div></div>
           <div class="card"><span class="label">Queued threads</span>
@@ -623,6 +637,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
                 f"<td><code title=\"{html.escape(key)}\">{html.escape(_short_key(key))}</code></td>"
                 f"<td>{html.escape(agent)}</td>"
                 f"<td>{job['elapsed_sec']}s</td>"
+                f"<td>{html.escape(str(job.get('schedule_id') or '—'))}</td>"
                 f"<td>{html.escape(preview)}</td>"
                 f"<td>{job['queue_behind']}</td>"
                 f"<td>{job['pid'] or '—'}</td>"
@@ -631,6 +646,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             job_cards.append(
                 f"""<div class="job-card">
                   <strong>{html.escape(agent)}</strong> · {job['elapsed_sec']}s
+                  {" · cron `" + html.escape(str(job['schedule_id'])) + "`" if job.get("schedule_id") else ""}
                   <div>{html.escape(preview)}</div>
                   <div class="meta">
                     <code title="{html.escape(key)}">{html.escape(_short_key(key, 36))}</code>
@@ -683,8 +699,8 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         </div>
         <div class="table-wrap desk-only">
           <table>
-            <tr><th>Session</th><th>Agent</th><th>Elapsed</th><th>Prompt</th><th>Queued</th><th>PID</th></tr>
-            {"".join(run_rows) or "<tr><td colspan=6><em>none</em></td></tr>"}
+            <tr><th>Session</th><th>Agent</th><th>Elapsed</th><th>Cron</th><th>Prompt</th><th>Queued</th><th>PID</th></tr>
+            {"".join(run_rows) or "<tr><td colspan=7><em>none</em></td></tr>"}
           </table>
         </div>
 
@@ -998,6 +1014,231 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             }
         )
         return RedirectResponse("/agents?saved=1", status_code=303)
+
+    def _unique_schedule_id(name: str) -> str:
+        base = slug_id(name)
+        sid = base
+        n = 2
+        while db.get_schedule(sid) is not None:
+            sid = f"{base}-{n}"
+            n += 1
+        return sid
+
+    def _agent_options(selected: str) -> str:
+        parts = []
+        for row in db.list_agent_rows():
+            aid = str(row["id"])
+            sel = " selected" if aid == selected else ""
+            label = f"{row.get('display_name') or aid} ({aid})"
+            parts.append(
+                f'<option value="{html.escape(aid)}"{sel}>{html.escape(label)}</option>'
+            )
+        return "".join(parts)
+
+    @app.get("/schedules", response_class=HTMLResponse)
+    async def schedules_page(
+        request: Request, _: None = Depends(require_auth)
+    ) -> HTMLResponse:
+        msg = ""
+        banner = ""
+        if request.query_params.get("saved"):
+            msg = "Schedule saved."
+        elif request.query_params.get("ran"):
+            msg = f"Run requested: {html.escape(request.query_params.get('ran') or '')}."
+        elif request.query_params.get("err"):
+            msg = html.escape(request.query_params.get("err") or "Error")
+            banner = "err"
+        rows_html: list[str] = []
+        running_keys = set()
+        if gateway is not None:
+            for job in gateway.live_status()["running"]:
+                sid = job.get("schedule_id")
+                if sid:
+                    running_keys.add(str(sid))
+        for row in db.list_schedules():
+            sid = str(row["id"])
+            status = str(row.get("last_status") or "—")
+            if sid in running_keys:
+                status = "running"
+            nxt = (row.get("next_run_at") or "—")[:19].replace("T", " ")
+            last = (row.get("last_run_at") or "—")[:19].replace("T", " ")
+            url = row.get("last_thread_url") or ""
+            thread_cell = (
+                f'<a href="{html.escape(url)}" target="_blank" rel="noreferrer">thread</a>'
+                if url
+                else "—"
+            )
+            en = bool(row.get("enabled"))
+            toggle = "Disable" if en else "Enable"
+            err = html.escape((row.get("last_error") or "")[:80])
+            rows_html.append(
+                "<tr>"
+                f"<td><code>{html.escape(sid)}</code></td>"
+                f"<td>{html.escape(str(row['name']))}</td>"
+                f"<td>{html.escape(str(row['agent_id']))}</td>"
+                f"<td><code>{html.escape(str(row['cron_expr']))}</code></td>"
+                f"<td>{html.escape(str(row.get('timezone') or DEFAULT_TZ))}</td>"
+                f"<td>{'on' if en else 'off'}</td>"
+                f"<td>{html.escape(status)}</td>"
+                f"<td>{html.escape(nxt)}</td>"
+                f"<td>{html.escape(last)}</td>"
+                f"<td>{thread_cell}</td>"
+                f"<td class='row-actions'>"
+                f"<form method='post' action='/schedules/{html.escape(sid)}/toggle'>"
+                f"<button type='submit'>{toggle}</button></form>"
+                f"<form method='post' action='/schedules/{html.escape(sid)}/run'>"
+                f"<button type='submit'>Run now</button></form>"
+                f"<a href='/schedules/{html.escape(sid)}/edit'>Edit</a>"
+                f"<form method='post' action='/schedules/{html.escape(sid)}/delete' "
+                f"onsubmit=\"return confirm('Delete {html.escape(sid)}?');\">"
+                f"<button type='submit' class='danger'>Delete</button></form>"
+                f"</td></tr>"
+                + (f"<tr><td colspan=11 class='muted'>{err}</td></tr>" if err else "")
+            )
+        agents = db.list_agent_rows()
+        agent_opts = _agent_options(str(agents[0]["id"]) if agents else "")
+        body = f"""
+        <p class="hint">Each run posts in the home channel and opens a <strong>public Discord thread</strong> in that agent’s
+        home channel (no <code>--resume</code> from the previous run). 5-field cron in the
+        schedule timezone (default <code>{html.escape(DEFAULT_TZ)}</code>).
+        Status auto-refresh 10s. Discord <code>/schedule</code> lists these.</p>
+        <div class="table-wrap">
+          <table>
+            <tr><th>Id</th><th>Name</th><th>Agent</th><th>Cron</th><th>TZ</th>
+            <th>On</th><th>Status</th><th>Next</th><th>Last</th><th>Thread</th><th></th></tr>
+            {"".join(rows_html) or "<tr><td colspan=11><em>none yet</em></td></tr>"}
+          </table>
+        </div>
+        <h3 class="section">Add schedule</h3>
+        <form method="post" action="/schedules/save">
+          <label>Name
+            <input type="text" name="name" required maxlength="{MAX_NAME}" placeholder="Morning health check"></label>
+          <label>Agent
+            <select name="agent_id">{agent_opts}</select></label>
+          <label>Cron (min hour day month weekday)
+            <input type="text" name="cron_expr" required placeholder="0 9 * * *"></label>
+          <label>Timezone
+            <input type="text" name="timezone" value="{html.escape(DEFAULT_TZ)}" placeholder="{html.escape(DEFAULT_TZ)}"></label>
+          <label>Prompt
+            <textarea name="prompt" required rows="5" maxlength="{MAX_PROMPT}"
+              placeholder="What the agent should do each run"></textarea></label>
+          <label><input type="checkbox" name="enabled" checked> Enabled</label>
+          <p><button type="submit">Create</button></p>
+        </form>
+        """
+        return page(
+            "Schedules",
+            body,
+            msg,
+            active="schedules",
+            refresh=10,
+            banner_class=banner,
+        )
+
+    @app.get("/schedules/{schedule_id}/edit", response_class=HTMLResponse)
+    async def schedules_edit(
+        schedule_id: str, _: None = Depends(require_auth)
+    ) -> HTMLResponse:
+        row = db.get_schedule(schedule_id)
+        if row is None:
+            raise HTTPException(404, "Unknown schedule")
+        en = "checked" if row.get("enabled") else ""
+        body = f"""
+        <form method="post" action="/schedules/save">
+          <input type="hidden" name="id" value="{html.escape(schedule_id)}">
+          <label>Name
+            <input type="text" name="name" required maxlength="{MAX_NAME}"
+              value="{html.escape(str(row['name']))}"></label>
+          <label>Agent
+            <select name="agent_id">{_agent_options(str(row['agent_id']))}</select></label>
+          <label>Cron
+            <input type="text" name="cron_expr" required
+              value="{html.escape(str(row['cron_expr']))}"></label>
+          <label>Timezone
+            <input type="text" name="timezone"
+              value="{html.escape(str(row.get('timezone') or DEFAULT_TZ))}"></label>
+          <label>Prompt
+            <textarea name="prompt" required rows="8" maxlength="{MAX_PROMPT}">{html.escape(str(row['prompt']))}</textarea></label>
+          <label><input type="checkbox" name="enabled" {en}> Enabled</label>
+          <p><button type="submit">Save</button>
+            <a href="/schedules">Cancel</a></p>
+        </form>
+        """
+        return page(f"Edit {schedule_id}", body, active="schedules")
+
+    @app.post("/schedules/save")
+    async def schedules_save(
+        name: str = Form(...),
+        agent_id: str = Form(...),
+        cron_expr: str = Form(...),
+        timezone: str = Form(DEFAULT_TZ),
+        prompt: str = Form(...),
+        enabled: str | None = Form(None),
+        id: str = Form(""),
+        _: None = Depends(require_auth),
+    ) -> RedirectResponse:
+        name = name.strip()
+        prompt = prompt.strip()
+        agent_id = agent_id.strip()
+        if not name or not prompt:
+            raise HTTPException(400, "name and prompt required")
+        if len(name) > MAX_NAME or len(prompt) > MAX_PROMPT:
+            raise HTTPException(400, "name or prompt too long")
+        if db.get_agent_row(agent_id) is None:
+            raise HTTPException(400, "unknown agent")
+        try:
+            cron_expr = validate_cron(cron_expr)
+            timezone = validate_timezone(timezone)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        sid = id.strip()
+        if sid:
+            if db.get_schedule(sid) is None:
+                raise HTTPException(404, "Unknown schedule")
+        else:
+            sid = _unique_schedule_id(name)
+        nxt = next_run_iso(cron_expr, timezone)
+        db.upsert_schedule(
+            {
+                "id": sid,
+                "name": name,
+                "agent_id": agent_id,
+                "cron_expr": cron_expr,
+                "timezone": timezone,
+                "prompt": prompt,
+                "enabled": enabled is not None,
+                "next_run_at": nxt,
+            }
+        )
+        return RedirectResponse("/schedules?saved=1", status_code=303)
+
+    @app.post("/schedules/{schedule_id}/toggle")
+    async def schedules_toggle(
+        schedule_id: str, _: None = Depends(require_auth)
+    ) -> RedirectResponse:
+        row = db.get_schedule(schedule_id)
+        if row is None:
+            raise HTTPException(404, "Unknown schedule")
+        db.set_schedule_enabled(schedule_id, not bool(row.get("enabled")))
+        return RedirectResponse("/schedules", status_code=303)
+
+    @app.post("/schedules/{schedule_id}/run")
+    async def schedules_run(
+        schedule_id: str, _: None = Depends(require_auth)
+    ) -> RedirectResponse:
+        if gateway is None or gateway.scheduler is None:
+            raise HTTPException(503, "scheduler not running")
+        result = await gateway.scheduler.fire(schedule_id, force=True)
+        return RedirectResponse(
+            f"/schedules?ran={quote(result)}", status_code=303
+        )
+
+    @app.post("/schedules/{schedule_id}/delete")
+    async def schedules_delete(
+        schedule_id: str, _: None = Depends(require_auth)
+    ) -> RedirectResponse:
+        db.delete_schedule(schedule_id)
+        return RedirectResponse("/schedules", status_code=303)
 
     @app.get("/sessions", response_class=HTMLResponse)
     async def sessions_page(_: None = Depends(require_auth)) -> HTMLResponse:

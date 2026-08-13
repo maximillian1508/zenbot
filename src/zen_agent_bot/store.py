@@ -58,6 +58,25 @@ CREATE TABLE IF NOT EXISTS secrets (
     value TEXT NOT NULL,
     updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS schedules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    cron_expr TEXT NOT NULL,
+    timezone TEXT NOT NULL DEFAULT 'Asia/Singapore',
+    prompt TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    next_run_at TEXT,
+    last_run_at TEXT,
+    last_status TEXT,
+    last_error TEXT,
+    last_thread_id TEXT,
+    last_session_key TEXT,
+    last_thread_url TEXT,
+    run_count INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -410,6 +429,169 @@ class ConfigStore:
     def clear_session(self, key: str) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM sessions WHERE session_key = ?", (key,))
+            self._conn.commit()
+
+    def _schedule_dict(self, row: sqlite3.Row) -> dict[str, Any]:
+        data = dict(row)
+        data["enabled"] = bool(data.get("enabled"))
+        data["run_count"] = int(data.get("run_count") or 0)
+        return data
+
+    def list_schedules(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM schedules ORDER BY enabled DESC, name COLLATE NOCASE, id"
+        ).fetchall()
+        return [self._schedule_dict(r) for r in rows]
+
+    def get_schedule(self, schedule_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM schedules WHERE id = ?", (schedule_id,)
+        ).fetchone()
+        return self._schedule_dict(row) if row else None
+
+    def upsert_schedule(self, row: dict[str, Any]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        created = str(row.get("created_at") or now)
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO schedules(
+                    id, name, agent_id, cron_expr, timezone, prompt, enabled,
+                    created_at, updated_at, next_run_at, last_run_at, last_status,
+                    last_error, last_thread_id, last_session_key, last_thread_url,
+                    run_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    agent_id = excluded.agent_id,
+                    cron_expr = excluded.cron_expr,
+                    timezone = excluded.timezone,
+                    prompt = excluded.prompt,
+                    enabled = excluded.enabled,
+                    updated_at = excluded.updated_at,
+                    next_run_at = excluded.next_run_at
+                """,
+                (
+                    row["id"],
+                    row["name"],
+                    row["agent_id"],
+                    row["cron_expr"],
+                    row.get("timezone") or "Asia/Singapore",
+                    row["prompt"],
+                    1 if row.get("enabled", True) else 0,
+                    created,
+                    now,
+                    row.get("next_run_at"),
+                    row.get("last_run_at"),
+                    row.get("last_status"),
+                    row.get("last_error"),
+                    row.get("last_thread_id"),
+                    row.get("last_session_key"),
+                    row.get("last_thread_url"),
+                    int(row.get("run_count") or 0),
+                ),
+            )
+            self._conn.commit()
+
+    def delete_schedule(self, schedule_id: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+            self._conn.commit()
+
+    def set_schedule_enabled(self, schedule_id: str, enabled: bool) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE schedules SET enabled = ?, updated_at = ? WHERE id = ?",
+                (1 if enabled else 0, now, schedule_id),
+            )
+            self._conn.commit()
+
+    def due_schedules(self, now_iso: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """
+            SELECT * FROM schedules
+            WHERE enabled = 1
+              AND (last_status IS NULL OR last_status != 'running')
+              AND next_run_at IS NOT NULL
+              AND next_run_at <= ?
+            ORDER BY next_run_at
+            """,
+            (now_iso,),
+        ).fetchall()
+        return [self._schedule_dict(r) for r in rows]
+
+    def mark_schedule_running(
+        self,
+        schedule_id: str,
+        *,
+        next_run_at: str,
+        thread_id: str | None,
+        session_key: str | None,
+        thread_url: str | None,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE schedules SET
+                    last_status = 'running',
+                    last_run_at = ?,
+                    last_error = NULL,
+                    last_thread_id = ?,
+                    last_session_key = ?,
+                    last_thread_url = ?,
+                    next_run_at = ?,
+                    run_count = run_count + 1,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (now, thread_id, session_key, thread_url, next_run_at, now, schedule_id),
+            )
+            self._conn.commit()
+
+    def mark_schedule_done(
+        self,
+        schedule_id: str,
+        *,
+        ok: bool,
+        error: str | None = None,
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE schedules SET
+                    last_status = ?,
+                    last_error = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                ("ok" if ok else "error", (error or "")[:1500] or None, now, schedule_id),
+            )
+            self._conn.commit()
+
+    def reset_stuck_schedules(self) -> int:
+        """Clear running flags left by a crash/restart."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                UPDATE schedules SET last_status = 'interrupted', updated_at = ?
+                WHERE last_status = 'running'
+                """,
+                (now,),
+            )
+            self._conn.commit()
+            return int(cur.rowcount)
+
+    def set_schedule_next_run(self, schedule_id: str, next_run_at: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE schedules SET next_run_at = ?, updated_at = ? WHERE id = ?",
+                (next_run_at, now, schedule_id),
+            )
             self._conn.commit()
 
     def prune_empty_sessions(self) -> int:

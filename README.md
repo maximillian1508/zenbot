@@ -57,6 +57,8 @@ uv run zen-agent-bot
 | **Check session** | `/status` (Discord) or admin **Status** page |
 | **Live jobs / errors** | Admin UI → **Status** (auto-refresh) |
 | **List fleet** | `/agents` |
+| **Cron** | Admin **Schedules** (create/enable/run) · `/schedule` lists · each run posts in the home channel and opens a **public Discord thread** |
+| **Handoff** | `/handoff agent:manager note:…` from a thread (picker) · **Ask Manager** button on non-manager job-done bubbles |
 
 Status messages **stream live** during runs (`STREAMING=false` to disable). Long runs and errors append `✅ Done @you · 3m 12s` on the **same** status bubble (not a new message). Send now / `/close` cancellations skip the ping.
 
@@ -93,7 +95,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md), [FEATURES.md](./FEATURES.md), [ROADMAP
 
 ## Deploy notes
 
-Preferred: **host systemd + uv**. `/rebuild` → `zenbot-rebuild.path` → `scripts/deploy.sh` → `systemctl restart zen-agent-bot` (~15s delay, `TimeoutStopSec=190`).
+Preferred: **host systemd + uv**. `/rebuild` → `zenbot-rebuild.path` → `scripts/deploy.sh` → `systemctl restart zen-agent-bot` (~15s delay, `TimeoutStopSec=620`). Human ops: `~/ZEN-AGENT-BOT.md` (handbook after sync).
 
 ```bash
 sudo /home/maxi/apps/zen-agent-bot/scripts/install-host-service.sh

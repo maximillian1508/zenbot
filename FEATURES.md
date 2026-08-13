@@ -56,7 +56,8 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | Admin live status | ✅ | — | **done** | `/status` + `/api/status` |
 | Codex / other CLIs | ❌ | 🟢 each | P2 | ~50 lines per adapter |
 | cursor-sdk local | ❌ | 🟡 | P2 ★ | Stream + cancel; same subscription |
-| Cron schedules | ❌ | 🟡 | P2 ★ | apscheduler + stored prompts |
+| Cron schedules | ✅ | — | **done** | Admin Schedules + `/schedule`; new Discord thread per run |
+| Thread handoff | ✅ | — | **done** | `/handoff` agent picker + **Ask Manager** button; new public thread + transcript |
 | Multi-workspace routing | ⚠️ per profile | 🟡 | P2 | Channel → workspace bindings |
 | OpenClaw-style bindings | ⚠️ 1:1 bots | 🟠 | P3 | YAML `routing:` rules |
 | Notifications on job done | ✅ | — | **done** | Same-bubble `@you` + duration; skip Send now / `/close` |
@@ -98,6 +99,8 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 10. ~~**Per-thread `/backend`**~~ ✅  
 11. ~~**Job-done ping + `/close`**~~ ✅  
 12. ~~**One-bot Discord + `/music` `/general` `/run`**~~ ✅  
-13. Phase 2/3: extra bindings · cursor-sdk / cron  
+13. ~~**Cron / scheduled jobs**~~ ✅  
+14. ~~**`/handoff` + Ask Manager**~~ ✅  
+15. Phase 2/3: extra bindings · cursor-sdk  
 
 See [ROADMAP.md](./ROADMAP.md) — **Decisions (2026-08-12)** + billing/phase detail.

@@ -6,16 +6,25 @@ from pathlib import Path
 from zen_agent_bot.agents.profile import AgentProfile, DiscordBinding
 from zen_agent_bot.transports.discord import (
     RESERVED_SLASH,
+    allowlist_mentions,
     channel_profile_map,
     group_profiles_by_token,
+    resolve_agent_name,
     resolve_agent_profile,
 )
 
 
-def _profile(pid: str, token: str, channel: int, *, manager: bool = False) -> AgentProfile:
+def _profile(
+    pid: str,
+    token: str,
+    channel: int,
+    *,
+    manager: bool = False,
+    display_name: str | None = None,
+) -> AgentProfile:
     return AgentProfile(
         id=pid,
-        display_name=pid.title(),
+        display_name=display_name or pid.title(),
         workspace=Path("/tmp"),
         default_backend="cursor-cli",
         skills=(),
@@ -60,6 +69,32 @@ class DiscordRouteTests(unittest.TestCase):
         self.assertIn("run", RESERVED_SLASH)
         self.assertNotIn("music", RESERVED_SLASH)
         self.assertNotIn("general", RESERVED_SLASH)
+
+    def test_resolve_agent_name_accepts_labels(self) -> None:
+        manager = _profile(
+            "manager", "tok", 1, manager=True, display_name="Zen Manager"
+        )
+        general = _profile("general", "tok", 2, display_name="Zen General")
+        fleet = [manager, general]
+        self.assertEqual(resolve_agent_name("manager", fleet).id, "manager")  # type: ignore[union-attr]
+        self.assertEqual(resolve_agent_name("Zen Manager", fleet).id, "manager")  # type: ignore[union-attr]
+        self.assertEqual(
+            resolve_agent_name("Zen Manager (manager)", fleet).id,  # type: ignore[union-attr]
+            "manager",
+        )
+        self.assertEqual(
+            resolve_agent_name("manager · Zen Manager", fleet).id,  # type: ignore[union-attr]
+            "manager",
+        )
+        self.assertIsNone(resolve_agent_name("nope", fleet))
+
+    def test_allowlist_mentions(self) -> None:
+        self.assertIsNone(allowlist_mentions([]))
+        self.assertEqual(allowlist_mentions([443644232234696714]), "<@443644232234696714>")
+        self.assertEqual(
+            allowlist_mentions([1, 2]),
+            "<@1> <@2>",
+        )
 
 
 if __name__ == "__main__":

@@ -22,6 +22,8 @@ description: >-
 
 Read before coding: `ROADMAP.md`, `ARCHITECTURE.md`, `FEATURES.md`, `README.md`.
 
+**Human ops / new host** (not this skill): `~/ZEN-AGENT-BOT.md` · https://docs.maximillianleonard.dev
+
 ## Architecture (short)
 
 ```text
@@ -170,7 +172,8 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 - ~~Master slash dispatch~~ ✅ — one Discord bot; `/music` `/general` `/manager` `/run`
 - OpenClaw-style extra bindings (non-home channels)
 - cursor-sdk local (stream + cancel)
-- Cron / scheduled jobs
+- ~~Cron / scheduled jobs~~ ✅ — admin **Schedules** + `/schedule`; each run = new Discord thread
+- ~~**`/handoff` + Ask Manager**~~ ✅ — pick agent or one-click manager; new public thread + transcript
 - Optional @mention wake in shared channels (default stays dedicated home channels)
 
 **Out of scope / defer**
@@ -202,6 +205,8 @@ Logs: `journalctl -u zen-agent-bot -f`, `data/logs/rebuild.log`, `journalctl -u 
 - Post in `#agent` → thread + streaming status + final reply
 - Follow-up while busy → queued message + **Send now** / **Drop**; then runs
 - Job finishes → same status bubble appends `✅ Done @you · 3m`; `/close` archives Discord thread and keeps `--resume`
+- Admin **Schedules** + `/schedule`; a due/run-now job opens a new thread in the agent home channel
+- `/handoff agent:manager` from a thread, or tap **Ask Manager** on a General/music job-done bubble
 - Admin: allowlist add/remove without restart
 - After code change: `/rebuild` or `sudo systemctl restart zen-agent-bot`; verify `/health`
 - `git push` works from agent jobs (host SSH keys)
