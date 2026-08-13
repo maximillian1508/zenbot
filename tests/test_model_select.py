@@ -8,7 +8,9 @@ from pathlib import Path
 from zen_agent_bot.backends.cursor_cli import CursorCliBackend, CursorCliConfig
 from zen_agent_bot.model_select import (
     OPENROUTER_FALLBACK,
+    apply_openrouter_online,
     format_cursor_catalog,
+    openrouter_online_enabled,
     parse_agent_models_output,
     parse_model_arg,
     resolve_model,
@@ -134,7 +136,12 @@ class ResolveModelTests(unittest.TestCase):
         self.db = ConfigStore(Path(self.tmp.name) / "gateway.db")
         self._env_backup = {
             key: os.environ.pop(key, None)
-            for key in ("AGENT_MODEL", "CLAUDE_MODEL", "OPENROUTER_MODEL")
+            for key in (
+                "AGENT_MODEL",
+                "CLAUDE_MODEL",
+                "OPENROUTER_MODEL",
+                "OPENROUTER_ONLINE",
+            )
         }
 
     def tearDown(self) -> None:
@@ -171,10 +178,60 @@ class ResolveModelTests(unittest.TestCase):
         self.assertEqual(resolved.model, OPENROUTER_FALLBACK)
         self.assertEqual(resolved.source, "default")
 
+    def test_openrouter_online_appends(self) -> None:
+        self.db.set_setting("backend.openrouter.model", "~deepseek/deepseek-v4-flash-latest")
+        self.db.set_setting("backend.openrouter.online", "true")
+        resolved = resolve_model(self.db, "missing", "openrouter")
+        self.assertEqual(
+            resolved.model, "~deepseek/deepseek-v4-flash-latest:online"
+        )
+        self.assertEqual(resolved.source, "admin")
+
+    def test_openrouter_online_idempotent_on_thread(self) -> None:
+        self.db.set_setting("backend.openrouter.online", "true")
+        self.db.set_session_model("t1", "openai/gpt-4o:online")
+        resolved = resolve_model(self.db, "t1", "openrouter")
+        self.assertEqual(resolved.model, "openai/gpt-4o:online")
+        self.assertEqual(resolved.source, "thread")
+
+    def test_openrouter_online_off_leaves_plain(self) -> None:
+        self.db.set_setting("backend.openrouter.model", "openai/gpt-4o")
+        resolved = resolve_model(self.db, "missing", "openrouter")
+        self.assertEqual(resolved.model, "openai/gpt-4o")
+
+    def test_openrouter_online_env_wins(self) -> None:
+        self.db.set_setting("backend.openrouter.model", "openai/gpt-4o")
+        self.db.set_setting("backend.openrouter.online", "false")
+        os.environ["OPENROUTER_ONLINE"] = "true"
+        self.assertTrue(openrouter_online_enabled(self.db))
+        resolved = resolve_model(self.db, "missing", "openrouter")
+        self.assertEqual(resolved.model, "openai/gpt-4o:online")
+
     def test_cursor_cli_default_is_none(self) -> None:
         resolved = resolve_model(self.db, "missing", "cursor-cli")
         self.assertIsNone(resolved.model)
         self.assertEqual(resolved.source, "default")
+
+
+class ApplyOnlineTests(unittest.TestCase):
+    def test_append_and_skip(self) -> None:
+        self.assertEqual(
+            apply_openrouter_online("openai/gpt-4o", online=True),
+            "openai/gpt-4o:online",
+        )
+        self.assertEqual(
+            apply_openrouter_online("openai/gpt-4o:online", online=True),
+            "openai/gpt-4o:online",
+        )
+        self.assertEqual(
+            apply_openrouter_online("openai/gpt-4o:nitro:online", online=True),
+            "openai/gpt-4o:nitro:online",
+        )
+        self.assertEqual(
+            apply_openrouter_online("openai/gpt-4o", online=False),
+            "openai/gpt-4o",
+        )
+        self.assertIsNone(apply_openrouter_online(None, online=True))
 
 
 class CursorCmdTests(unittest.TestCase):

@@ -28,7 +28,8 @@ backends:
     kind: openrouter
     api_key_env: OPENROUTER_API_KEY
     model: anthropic/claude-sonnet-4
-    # chat-only — no shell/tools; set OPENROUTER_API_KEY in .env
+    # online: true  # append :online (OpenRouter web search; extra $)
+    # chat-only — no shell; set OPENROUTER_API_KEY in .env
 
 agents:
   manager:

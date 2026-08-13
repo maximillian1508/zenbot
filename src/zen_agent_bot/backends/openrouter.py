@@ -16,10 +16,11 @@ if TYPE_CHECKING:
     from ..store import ConfigStore
 
 CHAT_ONLY_SYSTEM = (
-    "You are a chat assistant via OpenRouter. You have no shell, filesystem, or "
-    "tool access in this backend — answer from knowledge and the prompt only. "
-    "If the user needs code changes or server actions, say they should switch to "
-    "a cursor-cli agent profile."
+    "You are a chat assistant via OpenRouter. You have no shell or filesystem. "
+    "If the model id ends with :online, OpenRouter may inject live web search "
+    "results — use them and cite sources when you can. Otherwise answer from "
+    "knowledge and the prompt only. If the user needs code changes or server "
+    "actions, say they should switch to a cursor-cli agent profile."
 )
 
 

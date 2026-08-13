@@ -472,6 +472,11 @@ class ConfigStore:
             self.set_setting("backend.openrouter.api_key_env", str(or_cfg["api_key_env"]))
         if or_cfg.get("base_url"):
             self.set_setting("backend.openrouter.base_url", str(or_cfg["base_url"]))
+        if "online" in or_cfg:
+            self.set_setting(
+                "backend.openrouter.online",
+                "true" if or_cfg["online"] else "false",
+            )
         claude = backends.get("claude-cli") or {}
         if claude.get("command"):
             self.set_setting("backend.claude-cli.command", str(claude["command"]))

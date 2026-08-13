@@ -310,6 +310,9 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         cursor_model = db.get_setting("backend.cursor-cli.model") or ""
         claude_model = db.get_setting("backend.claude-cli.model") or ""
         openrouter_model = db.get_setting("backend.openrouter.model") or ""
+        openrouter_online = _truthy_setting(
+            db.get_setting("backend.openrouter.online"), False
+        )
         env_model_hits = [
             name
             for name in ("AGENT_MODEL", "CLAUDE_MODEL", "OPENROUTER_MODEL")
@@ -332,6 +335,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         )
         streaming_checked = "checked" if streaming else ""
         job_ping_checked = "checked" if job_ping else ""
+        openrouter_online_checked = "checked" if openrouter_online else ""
         open_script = (
             "document.body.classList.add('settings-open');" if open_on_load else ""
         )
@@ -355,7 +359,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
       </div>
 
       <h3 class="section">Gateway</h3>
-      <p class="hint">Saved to SQLite. Streaming &amp; models apply live; concurrent jobs &amp; guild need a restart.</p>
+      <p class="hint">Saved to SQLite. Streaming, models, and OpenRouter <code>:online</code> apply live; concurrent jobs &amp; guild need a restart.</p>
       <form method="post" action="/settings/save">
         <label><input type="checkbox" name="streaming_enabled" {streaming_checked}> Discord/Telegram streaming status edits</label>
         <label><input type="checkbox" name="job_done_ping" {job_ping_checked}> Append @ you on the status bubble when a job finishes (successes ≥ 1 min, or errors)</label>
@@ -376,6 +380,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
           <input type="text" name="claude_model" value="{html.escape(claude_model)}" placeholder="e.g. sonnet"></label>
         <label>openrouter model
           <input type="text" name="openrouter_model" value="{html.escape(openrouter_model)}" placeholder="e.g. anthropic/claude-sonnet-4"></label>
+        <label><input type="checkbox" name="openrouter_online" {openrouter_online_checked}> OpenRouter web search (append <code>:online</code>; extra $). Next job — no restart. Env <code>OPENROUTER_ONLINE</code> wins if set. Skip if the model already has <code>:online</code>.</label>
         <p><button type="submit">Save settings</button></p>
       </form>
 
@@ -565,6 +570,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         cursor_model: str = Form(""),
         claude_model: str = Form(""),
         openrouter_model: str = Form(""),
+        openrouter_online: str | None = Form(None),
         _: None = Depends(require_auth),
     ) -> RedirectResponse:
         jobs_raw = max_concurrent_jobs.strip() or "2"
@@ -586,6 +592,10 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         db.set_setting("backend.cursor-cli.model", cursor_model.strip())
         db.set_setting("backend.claude-cli.model", claude_model.strip())
         db.set_setting("backend.openrouter.model", openrouter_model.strip())
+        db.set_setting(
+            "backend.openrouter.online",
+            "true" if openrouter_online is not None else "false",
+        )
         if gateway is not None:
             gateway.config.streaming_enabled = stream_on
         return RedirectResponse("/?saved=settings", status_code=303)

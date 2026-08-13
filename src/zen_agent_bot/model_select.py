@@ -18,6 +18,9 @@ BACKEND_MODEL_SETTING = {
     "openrouter": "backend.openrouter.model",
 }
 OPENROUTER_FALLBACK = "anthropic/claude-sonnet-4"
+OPENROUTER_ONLINE_SETTING = "backend.openrouter.online"
+OPENROUTER_ONLINE_ENV = "OPENROUTER_ONLINE"
+ONLINE_SUFFIX = ":online"
 CLEAR_TOKENS = frozenset({"clear", "default", "none", "reset"})
 SHOW_TOKENS = frozenset({"list", "ls"})
 MAX_MODEL_LEN = 128
@@ -28,6 +31,41 @@ def blank_to_none(raw: str | None) -> str | None:
         return None
     text = raw.strip()
     return text or None
+
+
+def _truthy(raw: str | None, default: bool = False) -> bool:
+    if raw is None:
+        return default
+    text = raw.strip()
+    if not text:
+        return default
+    return text.lower() not in ("0", "false", "no", "off")
+
+
+def openrouter_online_enabled(db: ConfigStore) -> bool:
+    """Env OPENROUTER_ONLINE wins when set; else admin setting (default off)."""
+    if OPENROUTER_ONLINE_ENV in os.environ:
+        return _truthy(os.environ.get(OPENROUTER_ONLINE_ENV), False)
+    return _truthy(db.get_setting(OPENROUTER_ONLINE_SETTING), False)
+
+
+def has_online_suffix(model: str) -> bool:
+    if ":" not in model:
+        return False
+    _, _, rest = model.partition(":")
+    return "online" in rest.split(":")
+
+
+def apply_openrouter_online(model: str | None, *, online: bool) -> str | None:
+    """Append :online once when the toggle is on. Leave an existing suffix alone."""
+    if model is None:
+        return None
+    text = model.strip()
+    if not text:
+        return None
+    if has_online_suffix(text) or not online:
+        return text
+    return text + ONLINE_SUFFIX
 
 
 @dataclass(frozen=True)
@@ -58,8 +96,13 @@ def resolve_model(db: ConfigStore, session_key: str, backend: str) -> ResolvedMo
     row = db.get_session(session_key)
     thread = blank_to_none(row.get("model"))
     if thread:
-        return ResolvedModel(model=thread, source="thread", backend=backend)
-    model, source = admin_default_model(db, backend)
+        model, source = thread, "thread"
+    else:
+        model, source = admin_default_model(db, backend)
+    if backend == "openrouter":
+        model = apply_openrouter_online(
+            model, online=openrouter_online_enabled(db)
+        )
     return ResolvedModel(model=model, source=source, backend=backend)
 
 
