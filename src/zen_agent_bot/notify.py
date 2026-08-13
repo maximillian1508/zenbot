@@ -47,16 +47,28 @@ def format_job_done_ping(
     return f"⚠️ Finished with errors{who} · {dur}"
 
 
-def format_close_reply(*, cancelled: bool, dropped: int) -> str:
+def format_close_reply(
+    *,
+    cancelled: bool,
+    dropped: int,
+    archived: bool = False,
+) -> str:
     lines = ["Session closed."]
     if cancelled:
         lines.append("Stopped the running job.")
     if dropped:
         plural = "s" if dropped != 1 else ""
         lines.append(f"Dropped {dropped} queued message{plural}.")
-    lines.append(
-        "Next message here starts fresh (no resume, no `/model` or `/backend` override)."
-    )
+    if archived:
+        lines.append(
+            "Discord thread archived. Send a message to unarchive and continue "
+            "(`--resume` kept). `/new` drops resume; admin **Clear** forgets the mapping."
+        )
+    else:
+        lines.append(
+            "Next message continues the same session (`--resume` kept). "
+            "`/new` drops resume; admin **Clear** forgets the mapping."
+        )
     return "\n".join(lines)
 
 

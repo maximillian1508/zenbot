@@ -107,12 +107,18 @@ class CloseReplyTests(unittest.TestCase):
     def test_idle(self) -> None:
         text = format_close_reply(cancelled=False, dropped=0)
         self.assertIn("Session closed.", text)
-        self.assertIn("/model", text)
+        self.assertIn("--resume", text)
+        self.assertNotIn("archived", text.lower())
 
     def test_busy(self) -> None:
         text = format_close_reply(cancelled=True, dropped=2)
         self.assertIn("Stopped the running job.", text)
         self.assertIn("Dropped 2 queued messages.", text)
+
+    def test_archived(self) -> None:
+        text = format_close_reply(cancelled=False, dropped=0, archived=True)
+        self.assertIn("archived", text.lower())
+        self.assertIn("--resume", text)
 
 
 class PruneSessionsTests(unittest.TestCase):

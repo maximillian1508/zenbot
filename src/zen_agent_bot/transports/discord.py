@@ -124,6 +124,20 @@ def thread_key(channel: discord.abc.GuildChannel | discord.Thread) -> str:
     return str(channel.id)
 
 
+async def archive_agent_thread(channel: object) -> bool:
+    """Archive a Discord thread. Returns True if archived (or already)."""
+    if not isinstance(channel, discord.Thread):
+        return False
+    if channel.archived:
+        return True
+    try:
+        await channel.edit(archived=True, reason="/close")
+        return True
+    except discord.HTTPException:
+        log.warning("Failed to archive thread %s", getattr(channel, "id", "?"))
+        return False
+
+
 def in_agent_channel(
     message: discord.Message,
     agent_channel_id: int,
@@ -474,7 +488,7 @@ class AgentDiscordBot(discord.Client):
 
         @self.tree.command(
             name="close",
-            description="Close this thread's agent session (resume + overrides)",
+            description="Archive this thread; keep Cursor --resume",
         )
         async def cmd_close(interaction: discord.Interaction) -> None:
             ctx = await self._require_ctx(interaction)
@@ -483,10 +497,12 @@ class AgentDiscordBot(discord.Client):
             profile, channel = ctx
             key = self.gateway.session_key(profile.id, "discord", thread_key(channel))
             info = await self.gateway.close_session(key)
+            archived = await archive_agent_thread(channel)
             await interaction.response.send_message(
                 format_close_reply(
                     cancelled=bool(info["cancelled"]),
                     dropped=int(info["dropped"]),
+                    archived=archived,
                 )
             )
 

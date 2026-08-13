@@ -347,7 +347,7 @@ class Gateway:
         return "promoted"
 
     async def close_session(self, session_key: str) -> dict[str, int | bool]:
-        """Cancel in-flight work, drop the queue, delete the SQLite mapping."""
+        """Cancel in-flight work and drop the queue. Keep SQLite --resume mapping."""
         cancelled = await self.cancel_session(session_key, reason="stopped by /close")
         to_drop: list[_QueuedJob] = []
         state = self._sessions.get(session_key)
@@ -367,7 +367,6 @@ class Gateway:
                 await job.edit_status("🗑 Dropped — session closed.", view=None)
             except Exception:
                 log.exception("Failed to update dropped status on close %s", session_key)
-        self.store.clear(session_key)
         return {"cancelled": cancelled, "dropped": len(to_drop)}
 
     async def drop_queued(self, session_key: str, job_id: str) -> bool:
@@ -808,7 +807,7 @@ class Gateway:
         after = self.resolved_backend(agent_id, session_key)
         resume_note = ""
         if after.backend != before.backend:
-            self.store.reset_session_resume(session_key)
+            self.store.reset_resume(session_key)
             resume_note = (
                 "\nResume cleared — session ids don’t transfer across backends. "
                 "Next message starts a new session."

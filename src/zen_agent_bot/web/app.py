@@ -1020,9 +1020,9 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
                 f"<button type='submit' class='danger'>Clear</button></form></td></tr>"
             )
         body = f"""
-        <p class="hint">Thread ↔ backend session IDs. In chat, <code>/close</code> drops
-        resume + <code>/model</code> + <code>/backend</code>. <code>/new</code> only drops resume.
-        Clear here is the same as <code>/close</code>.</p>
+        <p class="hint">Thread ↔ backend session IDs. In chat, <code>/close</code> archives
+        the Discord thread and keeps <code>--resume</code>. <code>/new</code> only drops resume.
+        <strong>Clear</strong> here forgets the mapping (hard delete).</p>
         <form method="post" action="/sessions/prune" class="row-actions" style="margin-bottom:1rem">
           <button type="submit" class="danger">Prune empty (no resume id)</button>
         </form>
