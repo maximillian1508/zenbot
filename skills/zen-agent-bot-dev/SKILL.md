@@ -163,14 +163,13 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 5. ~~**Claude Code backend**~~ ✅ — `claude -p`; set agent `default_backend` to `claude-cli` (needs host `claude` login)
 6. ~~**File attachments**~~ ✅ — Discord/Telegram files → `data/attachments/`; paths injected into prompt (images via Read; other files by path; 25 MiB / 10 files)
 
-**Done (out of prior P2):** OpenRouter chat backend; **model selection**; **queue Send now** (Discord Stop & send + Drop).
+**Done (out of prior P2):** OpenRouter chat backend; **model selection**; **queue Send now** (Discord Stop & send + Drop); **per-thread `/backend`**.
 
 **P2 / Phase 2–3 (wanted)**
 
 - Session hygiene — prune stale SQLite mappings, `/close`, admin stale-sessions
 - Master slash dispatch — `/run <agent> …` from manager (keep 1-bot-per-profile primary)
 - OpenClaw-style bindings / channel→agent routing
-- Per-thread `/backend` override (reuse `/model` session columns)
 - cursor-sdk local (stream + cancel)
 - Cron / scheduled jobs
 - Job-done Discord notification

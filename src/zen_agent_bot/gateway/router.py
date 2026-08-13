@@ -13,6 +13,13 @@ from typing import Any, Awaitable, Callable
 from ..agents.registry import AgentRegistry
 from ..backends.base import AgentBackend, is_stream_line_too_large
 from ..config.load import GatewayConfig
+from ..backend_select import (
+    ResolvedBackend,
+    format_backend_catalog,
+    format_backend_status,
+    parse_backend_arg,
+    resolve_backend,
+)
 from ..model_select import (
     format_cursor_catalog,
     format_model_status,
@@ -191,11 +198,26 @@ class Gateway:
     def is_allowed(self, user_id: int) -> bool:
         return self.config.db.is_allowed(user_id)
 
-    def backend_for(self, agent_id: str) -> AgentBackend:
+    def known_backends(self) -> set[str]:
+        return set(self.backends.keys())
+
+    def resolved_backend(self, agent_id: str, session_key: str) -> ResolvedBackend:
         profile = self.agents.get(agent_id)
-        backend = self.backends.get(profile.default_backend)
+        return resolve_backend(
+            self.config.db,
+            session_key,
+            profile.default_backend,
+            known=self.known_backends(),
+        )
+
+    def backend_for(self, agent_id: str, session_key: str | None = None) -> AgentBackend:
+        profile = self.agents.get(agent_id)
+        name = profile.default_backend
+        if session_key:
+            name = self.resolved_backend(agent_id, session_key).backend
+        backend = self.backends.get(name)
         if backend is None:
-            raise KeyError(f"Backend {profile.default_backend!r} not configured")
+            raise KeyError(f"Backend {name!r} not configured")
         return backend
 
     def list_agents_markdown(self) -> str:
@@ -426,13 +448,12 @@ class Gateway:
 
         profile = self.agents.get(job.agent_id)
         sess = self.store.get(job.session_key)
-        resolved = resolve_model(
-            self.config.db, job.session_key, profile.default_backend
-        )
+        backend_name = self.resolved_backend(job.agent_id, job.session_key).backend
+        resolved = resolve_model(self.config.db, job.session_key, backend_name)
         full_prompt = build_prompt(
             agent_id=profile.id,
             display_name=profile.display_name,
-            backend=profile.default_backend,
+            backend=backend_name,
             workspace=profile.workspace,
             system_prompt=profile.system_prompt(self.config.project_root),
             skill_paths=profile.skills,
@@ -450,7 +471,7 @@ class Gateway:
                 else None
             )
             try:
-                result = await self.backend_for(job.agent_id).run(
+                result = await self.backend_for(job.agent_id, job.session_key).run(
                     prompt=full_prompt,
                     workspace=profile.workspace,
                     session_id=sess.session_id,
@@ -632,7 +653,7 @@ class Gateway:
         include_catalog: bool = False,
         catalog_max_chars: int = 1400,
     ) -> str:
-        profile = self.agents.get(agent_id)
+        backend_name = self.resolved_backend(agent_id, session_key).backend
         try:
             action, value = parse_model_arg(raw)
         except ValueError as exc:
@@ -641,9 +662,9 @@ class Gateway:
             self.store.set_model(session_key, value)
         elif action == "clear":
             self.store.set_model(session_key, None)
-        resolved = resolve_model(self.config.db, session_key, profile.default_backend)
+        resolved = resolve_model(self.config.db, session_key, backend_name)
         text = format_model_status(resolved)
-        if profile.default_backend != "cursor-cli":
+        if backend_name != "cursor-cli":
             return text
         models = await self.cursor_models()
         if action == "set" and value and models and not model_in_catalog(value, models):
@@ -657,6 +678,43 @@ class Gateway:
                 current=resolved.model,
                 max_chars=catalog_max_chars,
             )
+        return text
+
+    def apply_backend_command(
+        self,
+        *,
+        session_key: str,
+        agent_id: str,
+        raw: str | None,
+        include_catalog: bool = False,
+    ) -> str:
+        known = self.known_backends()
+        before = self.resolved_backend(agent_id, session_key)
+        try:
+            action, value = parse_backend_arg(raw, known=known)
+        except ValueError as exc:
+            return f"⚠️ {exc}"
+        if action == "set":
+            self.store.set_backend(session_key, value)
+        elif action == "clear":
+            self.store.set_backend(session_key, None)
+        after = self.resolved_backend(agent_id, session_key)
+        resume_note = ""
+        if after.backend != before.backend:
+            self.store.reset_session_resume(session_key)
+            resume_note = (
+                "\nResume cleared — session ids don’t transfer across backends. "
+                "Next message starts a new session."
+            )
+        model = resolve_model(self.config.db, session_key, after.backend)
+        text = (
+            format_backend_status(after)
+            + resume_note
+            + "\n\n"
+            + format_model_status(model)
+        )
+        if include_catalog:
+            text += "\n\n" + format_backend_catalog(known, current=after.backend)
         return text
 
     def request_rebuild(self, *, reason: str = "") -> Path:

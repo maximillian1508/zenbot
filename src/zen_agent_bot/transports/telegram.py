@@ -163,6 +163,7 @@ class TelegramAgentApp:
         app.add_handler(CommandHandler("status", self.cmd_status))
         app.add_handler(CommandHandler("cancel", self.cmd_cancel))
         app.add_handler(CommandHandler("model", self.cmd_model))
+        app.add_handler(CommandHandler("backend", self.cmd_backend))
         if self.profile.is_manager:
             app.add_handler(CommandHandler("agents", self.cmd_agents))
             app.add_handler(CommandHandler("rebuild", self.cmd_rebuild))
@@ -187,7 +188,7 @@ class TelegramAgentApp:
         key = self._session_key(update.effective_chat.id, update.message.message_thread_id if update.message else None)  # type: ignore[union-attr]
         self.gateway.reset_session_resume(key)
         await update.message.reply_text(  # type: ignore[union-attr]
-            "New session. Next message starts fresh. /model override is kept."
+            "New session. Next message starts fresh. /model and /backend overrides are kept."
         )
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -236,6 +237,23 @@ class TelegramAgentApp:
             raw=raw,
             include_catalog=include_catalog,
             catalog_max_chars=2800,
+        )
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+    async def cmd_backend(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.effective_chat or not update.message:
+            return
+        if not self.gateway.is_allowed(update.effective_user.id):
+            await update.message.reply_text("Not authorized.")
+            return
+        key = self._session_key(update.effective_chat.id, update.message.message_thread_id)
+        raw = " ".join(context.args) if context.args else None
+        include_catalog = not raw or raw.strip().lower() in {"list", "ls"}
+        msg = self.gateway.apply_backend_command(
+            session_key=key,
+            agent_id=self.agent_id,
+            raw=raw,
+            include_catalog=include_catalog,
         )
         await update.message.reply_text(msg, parse_mode="Markdown")
 

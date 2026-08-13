@@ -181,7 +181,7 @@ class AgentDiscordBot(discord.Client):
             self.gateway.reset_session_resume(key)
             await interaction.response.send_message(
                 "New session. Your next message here starts fresh (no `--resume`). "
-                "`/model` override is kept."
+                "`/model` and `/backend` overrides are kept."
             )
 
         @self.tree.command(name="status", description="Show agent session for this thread")
@@ -282,6 +282,58 @@ class AgentDiscordBot(discord.Client):
                 if len(display) > 100:
                     display = display[:97] + "…"
                 choices.append(app_commands.Choice(name=display, value=mid[:100]))
+                if len(choices) >= 25:
+                    break
+            return choices
+
+        @self.tree.command(
+            name="backend",
+            description="Show or set the agent backend for this thread",
+        )
+        @app_commands.describe(
+            name="cursor-cli, claude-cli, openrouter, or clear/default"
+        )
+        async def cmd_backend(
+            interaction: discord.Interaction, name: str | None = None
+        ) -> None:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                await interaction.response.send_message("Not authorized.", ephemeral=True)
+                return
+            channel = interaction.channel
+            if channel is None:
+                await interaction.response.send_message("No channel.", ephemeral=True)
+                return
+            key = self.gateway.session_key(agent_id, "discord", thread_key(channel))
+            include_catalog = name is None or name.strip().lower() in {"", "list", "ls"}
+            msg = self.gateway.apply_backend_command(
+                session_key=key,
+                agent_id=agent_id,
+                raw=name,
+                include_catalog=include_catalog,
+            )
+            await interaction.response.send_message(msg, ephemeral=True)
+
+        @cmd_backend.autocomplete("name")
+        async def backend_autocomplete(
+            interaction: discord.Interaction, current: str
+        ) -> list[app_commands.Choice[str]]:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                return []
+            q = current.lower().strip()
+            extras = [
+                ("clear", "clear thread override"),
+                ("default", "agent profile default"),
+            ]
+            rows = extras + [
+                (bid, bid) for bid in sorted(self.gateway.known_backends())
+            ]
+            choices: list[app_commands.Choice[str]] = []
+            for mid, label in rows:
+                hay = f"{mid} {label}".lower()
+                if q and q not in hay:
+                    continue
+                display = f"{label} · {mid}" if label != mid else mid
+                choices.append(app_commands.Choice(name=display[:100], value=mid[:100]))
                 if len(choices) >= 25:
                     break
             return choices

@@ -59,7 +59,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | 1.3 | **Discord polish** | Already exists; align with unified interface | 🟢 0.5d | — |
 | 1.4 | **Cross-channel session link** | Same `session_id` whether you reply on Discord or Telegram (optional `link` command) | 🟡 1d | shared `sessions.json` keyed by user-defined `project id` |
 | 1.5 | **Backend registry** | Pluggable `AgentBackend` protocol | 🟢 0.5d | — |
-| 1.6 | **Per-chat backend + workspace** | `/backend cursor`, `/workspace /home/maxi` | 🟢 1d | config store |
+| 1.6 | **Per-chat backend + workspace** | `/backend cursor` ✅; `/workspace` still later | 🟡 | session `backend` column |
 | 1.7 | **Streaming to chat** | Edit one Discord/TG message while agent runs | 🟡 1–2d | `stream-json` |
 | 1.8 | **Model selection** | Admin default models + `/model` in thread | ✅ | sessions + settings (see below) |
 
@@ -183,8 +183,9 @@ routing:
 7. ~~**File attachments**~~ ✅ — Discord/Telegram → `data/attachments/` + paths in prompt
 8. ~~**Model selection**~~ ✅ — admin fields + per-thread `/model` (session override; share plumbing with `/backend`)
 9. ~~**Queue “Send now” button**~~ ✅ — Discord Stop & send (cancel in-flight, run this follow-up)
-10. Session hygiene (Phase 2/3) + master slash dispatch (Phase 2/3)
-11. cursor-sdk / cron / notifications / per-thread `/backend`
+10. ~~**Per-thread `/backend`**~~ ✅
+11. Session hygiene (Phase 2/3) + master slash dispatch (Phase 2/3)
+12. cursor-sdk / cron / notifications
 
 ---
 
@@ -205,7 +206,7 @@ Locked from planning with Maxi — keep these when picking backlog work.
 
 **Done extras:** OpenRouter chat backend; Claude Code backend; file attachments (Discord/TG → `data/attachments/`, paths in prompt; 25 MiB / 10 files).
 
-**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · ~~queue Send now button~~ ✅ · session hygiene · master slash dispatch · bindings/routing · per-thread `/backend` · cursor-sdk · cron · job-done notify · OpenRouter.
+**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · ~~queue Send now button~~ ✅ · ~~per-thread `/backend`~~ ✅ · session hygiene · master slash dispatch · bindings/routing · cursor-sdk · cron · job-done notify · OpenRouter.
 
 ### Model selection (2026-08-13)
 
@@ -223,7 +224,7 @@ Locked from planning with Maxi — keep these when picking backlog work.
 - `/model` — show effective model (thread → admin/env → CLI default).
 - `/model <id>` — set override for **this thread only** (e.g. `composer-2.5`, `sonnet`, `anthropic/claude-sonnet-4`).
 - `/model clear` (or `default`) — drop override; next job uses admin/env.
-- Store on `sessions` (add `model` column; same row as planned `backend` for `/backend`).
+- Store on `sessions.model` (same row as `/backend`).
 - In-flight job unchanged; next queued/new job in the thread picks it up.
 - Discord slash + Telegram text command.
 
@@ -233,7 +234,15 @@ Locked from planning with Maxi — keep these when picking backlog work.
 2. Admin/env default for the **active backend**  
 3. CLI / OpenRouter built-in default  
 
-`/backend` (still P2) should reuse the same session-override columns.
+### Per-thread `/backend` (2026-08-13)
+
+**Shipped.** Same session row as `/model`.
+
+- `/backend` — show effective backend (thread → agent profile default) + model.
+- `/backend cursor-cli` / `claude-cli` / `openrouter` (aliases: `cursor`, `claude`, `or`).
+- `/backend clear` — drop override; next job uses the agent profile default.
+- Changing the **effective** backend clears `--resume` (session ids don’t transfer). `/model` override is kept.
+- In-flight job unchanged; next queued/new job picks it up.
 
 ### Queue “Send now” (2026-08-13)
 
