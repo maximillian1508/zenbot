@@ -62,7 +62,7 @@ Status messages **stream live** during runs (`STREAMING=false` to disable). Long
 
 ## OpenRouter (optional)
 
-Chat-only backend (no shell/tools). Set `OPENROUTER_API_KEY` in admin **Secrets** (live) or `.env`, optionally `OPENROUTER_MODEL` / Settings model. Set an agent's **default backend** to `openrouter` in the admin UI (**restart**) or use `/backend openrouter` in a thread (live). Good for cheap Q&A; keep `cursor-cli` for server/code work.
+Chat-only backend (no shell). Set `OPENROUTER_API_KEY` in admin **Secrets** (live) or `.env`, optionally `OPENROUTER_MODEL` / Settings model. Settings checkbox **OpenRouter web search** (or `OPENROUTER_ONLINE=true`) appends `:online` to the resolved model — live on the next job, extra $. Set an agent's **default backend** to `openrouter` in the admin UI (**restart**) or use `/backend openrouter` in a thread (live). Good for cheap Q&A; keep `cursor-cli` for server/code work.
 
 ## Claude Code (optional)
 

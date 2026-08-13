@@ -43,7 +43,7 @@ Discord/Telegram → transports → Gateway (queue + sessions) → backends (cur
 |------------------------|-------------|
 | Agent profiles, channels, token_env **names** | Process paths: `AGENT_BIN`, `AGENT_WORKSPACE`, `ADMIN_LISTEN` |
 | Allowlist, sessions, settings, **secret values** | Env still works; admin Secrets **wins** if set |
-| Secret names: `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `DISCORD_TOKEN_*`, `TELEGRAM_TOKEN_*`, `ADMIN_PASSWORD` | `DISCORD_GUILD_ID` / `AGENT_MODEL` env still override settings |
+| Secret names: `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `DISCORD_TOKEN_*`, `TELEGRAM_TOKEN_*`, `ADMIN_PASSWORD` | `DISCORD_GUILD_ID` / `AGENT_MODEL` / `OPENROUTER_ONLINE` env still override settings |
 
 First-run seed: `data/config.yaml` → migrates to SQLite once if DB empty.
 

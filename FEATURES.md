@@ -15,7 +15,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | Cursor agent CLI | ✅ native | ✅ via plugin | ⚠️ shell only | ❌ |
 | Claude Code CLI | ❌ | ✅ | ⚠️ | ❌ |
 | Codex / Pi / OpenCode | ❌ | ✅ | ❌ | ❌ |
-| OpenRouter / API models | ✅ chat-only | ✅ | ✅ core | ❌ |
+| OpenRouter / API models | ✅ chat + optional `:online` | ✅ | ✅ core | ❌ |
 | New task / session | ✅ thread + `/new` | ✅ per binding | ✅ per chat | ✅ new chat tab |
 | Resume conversation | ✅ `--resume` | ✅ sessions | ✅ session store | ✅ same tab |
 | Multi-agent routing | ✅ **one bot per profile** | ✅ bindings | ✅ toolsets | ✅ topics per tab |
@@ -52,7 +52,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | **Model selection** | ✅ | — | **done** | Admin fields + `/model` in thread; live apply |
 | Job queue + `/cancel` | ✅ | — | **done** | Graceful shutdown + `/rebuild` too |
 | **Queue Send now button** | ✅ | — | **done** | Discord Stop & send + Drop; see ROADMAP |
-| OpenRouter chat | ✅ | — | **done** | Chat-only; `OPENROUTER_API_KEY` |
+| OpenRouter chat | ✅ | — | **done** | Chat-only; optional `:online` search toggle |
 | Admin live status | ✅ | — | **done** | `/status` + `/api/status` |
 | Codex / other CLIs | ❌ | 🟢 each | P2 | ~50 lines per adapter |
 | cursor-sdk local | ❌ | 🟡 | P2 ★ | Stream + cancel; same subscription |

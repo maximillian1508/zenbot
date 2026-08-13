@@ -241,7 +241,7 @@ Cursor CLI picks up project skills from workspace too; explicit injection guaran
 |---------|-----------------|----------|
 | manager | `cursor-cli` | — (server/code) |
 | music | `cursor-cli` | — (must have shell) |
-| general | `openrouter` | chat-only Q&A; no shell |
+| general | `openrouter` | chat Q&A; optional `:online` search; no shell |
 
 Per-thread `/model <id>` and `/backend <id>` are live (`sessions.model` / `sessions.backend`). `/new` keeps both overrides and only drops `--resume`. Switching backend clears resume (ids don’t transfer). Resolve backend at job start: thread override → agent profile default. Then resolve model: thread → env → admin `backend.<kind>.model` → CLI default. See [ROADMAP.md](./ROADMAP.md#model-selection-2026-08-13).
 

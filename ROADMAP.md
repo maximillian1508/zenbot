@@ -70,7 +70,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | 2.1 | **cursor-cli** (done) | Subscription | ✅ | `agent -p --force --resume` |
 | 2.2 | **cursor-sdk local** | Subscription | 🟡 1–2d | `AsyncClient.launch_bridge` + stream; needs `CURSOR_API_KEY` |
 | 2.3 | **claude-cli** | Claude Max/Pro | 🟢 1d | `claude -p --dangerously-skip-permissions` or sandbox profile |
-| 2.4 | **openrouter** | API $ | ✅ | Chat completions only; **no native shell** |
+| 2.4 | **openrouter** | API $ | ✅ | Chat completions; optional `:online` web search toggle |
 | 2.5 | **openrouter + tools** (optional later) | API $ | 🟠 1w | Reimplement tool loop or delegate hard tasks to cursor-cli |
 
 **Default routing suggestion:**
@@ -215,7 +215,8 @@ Locked from planning with Maxi — keep these when picking backlog work.
 
 **Admin**
 
-- Settings (or agent form): default model per backend — `backend.cursor-cli.model`, `backend.claude-cli.model`, `backend.openrouter.model` (keys already exist; UI does not).
+- Settings (or agent form): default model per backend — `backend.cursor-cli.model`, `backend.claude-cli.model`, `backend.openrouter.model`.
+- OpenRouter web search: `backend.openrouter.online` (admin checkbox) or env `OPENROUTER_ONLINE` — appends `:online` at resolve time (idempotent).
 - Blank = omit `--model` / use that CLI’s default (OpenRouter keeps its current default string).
 - Env still wins if set: `AGENT_MODEL`, `CLAUDE_MODEL`, `OPENROUTER_MODEL`.
 - Apply **live** (like allowlist): read model at job start, do not bake only at process boot. No restart for model edits.
