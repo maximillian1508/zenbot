@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 import uuid
@@ -28,6 +29,7 @@ from ..model_select import (
     parse_model_arg,
     resolve_model,
 )
+from ..notify import append_status_line, format_job_done_ping, should_ping_done
 from ..sessions import SessionStore, ThreadSession
 from ..skills.loader import build_prompt
 from ..util.proc import terminate_process
@@ -68,6 +70,7 @@ class _QueuedJob:
     send: SendText
     edit_status: EditText
     ready: bool = True
+    notify_mention: str | None = None
 
 
 @dataclass
@@ -259,6 +262,7 @@ class Gateway:
         send: SendText,
         edit_status: EditText,
         on_queued: Callable[[str], Awaitable[None]] | None = None,
+        notify_mention: str | None = None,
     ) -> JobResult:
         if self._shutting_down:
             await edit_status("⚠️ Gateway is shutting down — try again after restart.")
@@ -272,6 +276,7 @@ class Gateway:
             user_prompt=user_prompt,
             send=send,
             edit_status=edit_status,
+            notify_mention=notify_mention,
         )
         async with state.lock:
             ahead = queued_count(state.pending, stop=_STOP) + (1 if state.busy else 0)
@@ -299,37 +304,68 @@ class Gateway:
         state.wake.set()
         return JobResult(text="", exit_code=0, session_id=None)
 
-    async def cancel_session(self, session_key: str) -> bool:
+    async def cancel_session(
+        self, session_key: str, *, reason: str = "stopped by /cancel"
+    ) -> bool:
         state = self._sessions.get(session_key)
         if state is None or not state.busy or state.run_handle is None:
             return False
-        await state.run_handle.cancel("stopped by /cancel")
+        await state.run_handle.cancel(reason)
         return True
 
     async def send_now(self, session_key: str, job_id: str) -> str:
-        """Stop & send: promote this queued job and cancel the in-flight run."""
+        """Stop & send: promote this queued job and cancel the in-flight run.
+
+        Capture the current run handle under the lock. After awaits, the worker
+        may already have started *this* job — never cancel a newer handle.
+        """
         state = self._sessions.get(session_key)
         if state is None:
             return "missing"
         async with state.lock:
             job = promote_by_id(state.pending, job_id)
-        if job is None or not isinstance(job, _QueuedJob):
-            return "missing"
-        job.ready = True
-        state.wake.set()
+            if job is None or not isinstance(job, _QueuedJob):
+                return "missing"
+            job.ready = True
+            in_flight = state.run_handle if state.busy else None
+            state.wake.set()
         try:
             await job.edit_status(
-                "⏭ **Sending now** — stopping the current job…",
+                "⏭ **Sending now** — stopping the current job…"
+                if in_flight is not None
+                else "⏭ **Sending now** — starting…",
                 view=None,
             )
         except Exception:
             log.exception("Failed to update queued status for send-now %s", job_id)
-        if state.busy and state.run_handle is not None:
-            await state.run_handle.cancel(
-                "stopped by Send now (queued follow-up)"
-            )
+        if in_flight is not None:
+            await in_flight.cancel("stopped by Send now (queued follow-up)")
             return "cancelled"
         return "promoted"
+
+    async def close_session(self, session_key: str) -> dict[str, int | bool]:
+        """Cancel in-flight work, drop the queue, delete the SQLite mapping."""
+        cancelled = await self.cancel_session(session_key, reason="stopped by /close")
+        to_drop: list[_QueuedJob] = []
+        state = self._sessions.get(session_key)
+        if state is not None:
+            async with state.lock:
+                leftover: deque[Any] = deque()
+                while state.pending:
+                    item = state.pending.popleft()
+                    if item is _STOP:
+                        leftover.append(item)
+                    elif isinstance(item, _QueuedJob):
+                        to_drop.append(item)
+                state.pending.extend(leftover)
+                state.wake.set()
+        for job in to_drop:
+            try:
+                await job.edit_status("🗑 Dropped — session closed.", view=None)
+            except Exception:
+                log.exception("Failed to update dropped status on close %s", session_key)
+        self.store.clear(session_key)
+        return {"cancelled": cancelled, "dropped": len(to_drop)}
 
     async def drop_queued(self, session_key: str, job_id: str) -> bool:
         state = self._sessions.get(session_key)
@@ -416,6 +452,7 @@ class Gateway:
             state.current_agent_id = job.agent_id
             state.current_prompt = job.user_prompt
             state.started_at = time.time()
+            result: JobResult | None = None
             try:
                 result = await self._execute_job(job)
                 if result.error and result.error != "cancelled":
@@ -431,8 +468,17 @@ class Gateway:
                     agent_id=job.agent_id,
                     error=str(exc),
                 )
+                result = JobResult(
+                    text="", exit_code=1, session_id=None, error=str(exc)
+                )
                 try:
-                    await job.edit_status("❌ Internal error — check logs.", view=None)
+                    await self._edit_final(
+                        job,
+                        state,
+                        result,
+                        "❌ Internal error — check logs.",
+                        view=None,
+                    )
                 except Exception:
                     log.exception("Failed to update status for %s", session_key)
             finally:
@@ -442,9 +488,57 @@ class Gateway:
                 state.current_prompt = None
                 state.started_at = None
 
+    def _done_ping_line(
+        self,
+        job: _QueuedJob,
+        state: _SessionState,
+        result: JobResult,
+    ) -> str | None:
+        cancel_reason = ""
+        if state.run_handle is not None:
+            cancel_reason = state.run_handle.cancel_reason
+        started = state.started_at or time.time()
+        elapsed = time.time() - started
+        ping_on = (self.config.db.get_setting("job_done_ping") or "true").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+            "off",
+        )
+        if not should_ping_done(
+            error=result.error,
+            cancel_reason=cancel_reason,
+            elapsed_sec=elapsed,
+            enabled=ping_on,
+        ):
+            return None
+        return format_job_done_ping(
+            mention=job.notify_mention,
+            exit_code=result.exit_code,
+            error=result.error,
+            elapsed_sec=elapsed,
+        )
+
+    async def _edit_final(
+        self,
+        job: _QueuedJob,
+        state: _SessionState,
+        result: JobResult,
+        status: str,
+        *,
+        view: object | None = None,
+    ) -> None:
+        ping = self._done_ping_line(job, state, result)
+        if ping:
+            status = append_status_line(status, ping)
+        await job.edit_status(status, view=view)
+
     async def _execute_job(self, job: _QueuedJob) -> JobResult:
         state = self._sessions[job.session_key]
         await job.edit_status("⏳ Agent running…", view=None)
+        cursor_key = self.config.db.resolve_secret("CURSOR_API_KEY")
+        if cursor_key:
+            os.environ["CURSOR_API_KEY"] = cursor_key
 
         profile = self.agents.get(job.agent_id)
         sess = self.store.get(job.session_key)
@@ -485,21 +579,25 @@ class Gateway:
                 existing = ""
                 if progress and progress.latest.strip():
                     existing = progress.latest
-                await job.edit_status(
+                failed = JobResult(
+                    text=str(exc),
+                    exit_code=1,
+                    session_id=sess.session_id,
+                    error=str(exc),
+                )
+                await self._edit_final(
+                    job,
+                    state,
+                    failed,
                     _status_with_footer(
                         existing=existing,
                         emoji="❌",
                         title="Interrupted",
                         display_name=profile.display_name,
                         reason=_friendly_failure_reason(exc),
-                    )
+                    ),
                 )
-                return JobResult(
-                    text=str(exc),
-                    exit_code=1,
-                    session_id=sess.session_id,
-                    error=str(exc),
-                )
+                return failed
             finally:
                 if progress:
                     await progress.flush()
@@ -511,12 +609,15 @@ class Gateway:
                 existing = progress.latest
             else:
                 existing = (result.text or "").strip()
-            await job.edit_status(
+            await self._edit_final(
+                job,
+                state,
+                result,
                 _cancelled_status_message(
                     existing=existing,
                     display_name=profile.display_name,
                     reason=run_handle.cancel_reason,
-                )
+                ),
             )
             if result.session_id:
                 title = sess.title or title_from_prompt(job.user_prompt)
@@ -542,14 +643,17 @@ class Gateway:
                 "(interrupted)",
             }:
                 existing = (result.text or "").strip()
-            await job.edit_status(
+            await self._edit_final(
+                job,
+                state,
+                result,
                 _status_with_footer(
                     existing=existing,
                     emoji="⚠️",
                     title="Interrupted",
                     display_name=profile.display_name,
                     reason=interrupt_reason,
-                )
+                ),
             )
             if result.session_id:
                 title = sess.title or title_from_prompt(job.user_prompt)
@@ -579,9 +683,9 @@ class Gateway:
         status_limit = 1900
         combined = f"{header}\n\n{display}" if display.strip() else header
         if len(combined) <= status_limit:
-            await job.edit_status(combined)
+            await self._edit_final(job, state, result, combined)
         else:
-            await job.edit_status(header)
+            await self._edit_final(job, state, result, header)
             await job.send(display)
             if len(body) > 8000:
                 await job.send(f"_(truncated — full output was {len(body)} chars)_")

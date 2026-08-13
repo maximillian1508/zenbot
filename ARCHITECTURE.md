@@ -253,9 +253,9 @@ Billing reminder: [ROADMAP.md](./ROADMAP.md#billing--quota-important).
 
 - Agent profiles (prompt, skills, workspace, backend)
 - Backend default **models** (Settings; live apply)
-- Transport tokens (`*_env` names, not values)
+- Transport tokens (`*_env` names) + **Secrets** page (values masked; SQLite, admin wins over `.env`)
 - Routing rules
-- Session list / clear
+- Session list / clear / prune empty (`/close` in chat)
 - Job queue / logs
 - Test button: “ping backend” (`agent status`, `claude --version`)
 
@@ -292,7 +292,7 @@ Listen `127.0.0.1:8787`; expose via **Tailscale**, not public internet.
 | Linked sessions Discord ↔ Telegram? | Same **profile** shares session store key `profile_id + project_slug`; user runs `/project music` |
 | Manager auto-delegate to music? | v2; v1 use two bots |
 | How many Discord bots? | Start with **2** (manager + music); add more profiles in YAML |
-| Secrets | Always `.env` / systemd `EnvironmentFile`; YAML only `token_env: DISCORD_TOKEN_MUSIC` |
+| Secrets | Admin **Secrets** (SQLite) or `.env` / systemd `EnvironmentFile`; YAML only `token_env` names |
 
 ---
 

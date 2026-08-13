@@ -107,8 +107,8 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | 4.3b | Graceful shutdown (`stop_grace_period` + SIGTERM) | ✅ |
 | 4.4 | Skills prefix (load `~/.cursor/skills/*/SKILL.md` by name) | 🟡 1d |
 | 4.5 | Cron (`/schedule daily …`) | 🟡 2d |
-| 4.6 | Notifications (Discord/TG ping when long job finishes) | 🟢 |
-| 4.7 | Session hygiene (`/close`, prune stale mappings) | 🟢 Phase 2/3 |
+| 4.6 | Notifications (Discord/TG ping when job finishes) | ✅ |
+| 4.7 | Session hygiene (`/close`, prune empty mappings) | ✅ |
 
 ### Phase 5 — Later / maybe
 
@@ -184,8 +184,9 @@ routing:
 8. ~~**Model selection**~~ ✅ — admin fields + per-thread `/model` (session override; share plumbing with `/backend`)
 9. ~~**Queue “Send now” button**~~ ✅ — Discord Stop & send (cancel in-flight, run this follow-up)
 10. ~~**Per-thread `/backend`**~~ ✅
-11. Session hygiene (Phase 2/3) + master slash dispatch (Phase 2/3)
-12. cursor-sdk / cron / notifications
+11. ~~**Job-done ping + `/close`**~~ ✅
+12. Master slash dispatch (Phase 2/3)
+13. cursor-sdk / cron
 
 ---
 
@@ -206,7 +207,7 @@ Locked from planning with Maxi — keep these when picking backlog work.
 
 **Done extras:** OpenRouter chat backend; Claude Code backend; file attachments (Discord/TG → `data/attachments/`, paths in prompt; 25 MiB / 10 files).
 
-**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · ~~queue Send now button~~ ✅ · ~~per-thread `/backend`~~ ✅ · session hygiene · master slash dispatch · bindings/routing · cursor-sdk · cron · job-done notify · OpenRouter.
+**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · ~~queue Send now button~~ ✅ · ~~per-thread `/backend`~~ ✅ · ~~job-done ping~~ ✅ · ~~`/close` / session hygiene~~ ✅ · master slash dispatch · bindings/routing · cursor-sdk · cron · OpenRouter.
 
 ### Model selection (2026-08-13)
 

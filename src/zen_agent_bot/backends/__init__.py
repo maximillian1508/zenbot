@@ -1,14 +1,21 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .base import AgentBackend, AgentRunResult
 from .claude_cli import ClaudeCliBackend, ClaudeCliConfig
 from .cursor_cli import CursorCliBackend, CursorCliConfig
 from .openrouter import OpenRouterBackend, OpenRouterConfig
 
+if TYPE_CHECKING:
+    from ..store import ConfigStore
 
-def build_backends(raw: dict[str, Any]) -> dict[str, AgentBackend]:
+
+def build_backends(
+    raw: dict[str, Any],
+    *,
+    store: ConfigStore | None = None,
+) -> dict[str, AgentBackend]:
     backends: dict[str, AgentBackend] = {}
     for name, cfg in raw.items():
         kind = str(cfg.get("kind", "cursor-cli"))
@@ -39,7 +46,8 @@ def build_backends(raw: dict[str, Any]) -> dict[str, AgentBackend]:
                     timeout_sec=int(cfg.get("timeout_sec", 300)),
                     site_url=cfg.get("site_url"),
                     site_name=cfg.get("site_name", "zen-agent-bot"),
-                )
+                ),
+                secrets=store,
             )
         else:
             raise ValueError(f"Unknown backend kind {kind!r} for {name!r}")

@@ -135,7 +135,8 @@ def load_config() -> GatewayConfig:
                 "model": or_model,
                 "base_url": or_base,
             },
-        }
+        },
+        store=db,
     )
 
     max_jobs = int(

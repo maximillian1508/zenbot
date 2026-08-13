@@ -18,6 +18,7 @@ from ..attachments import (
     write_attachment,
 )
 from ..gateway.router import Gateway, title_from_prompt
+from ..notify import format_close_reply
 from ..sessions import ThreadSession
 
 if TYPE_CHECKING:
@@ -229,6 +230,27 @@ class AgentDiscordBot(discord.Client):
                     "Nothing running in this thread.",
                     ephemeral=True,
                 )
+
+        @self.tree.command(
+            name="close",
+            description="Close this thread's agent session (resume + overrides)",
+        )
+        async def cmd_close(interaction: discord.Interaction) -> None:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                await interaction.response.send_message("Not authorized.", ephemeral=True)
+                return
+            channel = interaction.channel
+            if channel is None:
+                await interaction.response.send_message("No channel.", ephemeral=True)
+                return
+            key = self.gateway.session_key(agent_id, "discord", thread_key(channel))
+            info = await self.gateway.close_session(key)
+            await interaction.response.send_message(
+                format_close_reply(
+                    cancelled=bool(info["cancelled"]),
+                    dropped=int(info["dropped"]),
+                )
+            )
 
         @self.tree.command(
             name="model",
@@ -507,6 +529,7 @@ class AgentDiscordBot(discord.Client):
                 send=send,
                 edit_status=edit_status,
                 on_queued=on_queued,
+                notify_mention=message.author.mention,
             ),
             name=f"agent-{sess_key}",
         )

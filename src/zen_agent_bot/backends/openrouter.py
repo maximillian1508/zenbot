@@ -6,10 +6,14 @@ import os
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 
 from .base import AgentRunResult, ProgressCallback, RegisterProc
+
+if TYPE_CHECKING:
+    from ..store import ConfigStore
 
 CHAT_ONLY_SYSTEM = (
     "You are a chat assistant via OpenRouter. You have no shell, filesystem, or "
@@ -40,14 +44,24 @@ def _format_progress(text: str, max_len: int = 1800) -> str:
 class OpenRouterBackend:
     """OpenAI-compatible chat completions via OpenRouter (no tools / no shell)."""
 
-    def __init__(self, config: OpenRouterConfig) -> None:
+    def __init__(
+        self,
+        config: OpenRouterConfig,
+        *,
+        secrets: ConfigStore | None = None,
+    ) -> None:
         self.config = config
+        self._secrets = secrets
 
     def _api_key(self) -> str:
-        key = os.environ.get(self.config.api_key_env, "").strip()
+        if self._secrets is not None:
+            key = self._secrets.resolve_secret(self.config.api_key_env)
+        else:
+            key = os.environ.get(self.config.api_key_env, "").strip()
         if not key:
             raise RuntimeError(
-                f"OpenRouter API key missing — set {self.config.api_key_env} in .env"
+                f"OpenRouter API key missing — set {self.config.api_key_env} "
+                "in admin Secrets or .env"
             )
         return key
 

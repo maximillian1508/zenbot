@@ -17,6 +17,7 @@ from ..attachments import (
     write_attachment,
 )
 from ..gateway.router import Gateway
+from ..notify import format_close_reply
 
 log = logging.getLogger(__name__)
 
@@ -164,6 +165,7 @@ class TelegramAgentApp:
         app.add_handler(CommandHandler("cancel", self.cmd_cancel))
         app.add_handler(CommandHandler("model", self.cmd_model))
         app.add_handler(CommandHandler("backend", self.cmd_backend))
+        app.add_handler(CommandHandler("close", self.cmd_close))
         if self.profile.is_manager:
             app.add_handler(CommandHandler("agents", self.cmd_agents))
             app.add_handler(CommandHandler("rebuild", self.cmd_rebuild))
@@ -257,6 +259,21 @@ class TelegramAgentApp:
         )
         await update.message.reply_text(msg, parse_mode="Markdown")
 
+    async def cmd_close(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.effective_user or not update.effective_chat or not update.message:
+            return
+        if not self.gateway.is_allowed(update.effective_user.id):
+            await update.message.reply_text("Not authorized.")
+            return
+        key = self._session_key(update.effective_chat.id, update.message.message_thread_id)
+        info = await self.gateway.close_session(key)
+        await update.message.reply_text(
+            format_close_reply(
+                cancelled=bool(info["cancelled"]),
+                dropped=int(info["dropped"]),
+            )
+        )
+
     async def cmd_agents(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
             return
@@ -346,6 +363,7 @@ class TelegramAgentApp:
                 user_prompt=prompt,
                 send=send,
                 edit_status=edit_status,
+                notify_mention=update.effective_user.first_name or None,
             ),
             name=f"telegram-{sess_key}",
         )

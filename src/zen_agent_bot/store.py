@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -12,6 +14,10 @@ import yaml
 
 from .agents.profile import AgentProfile, DiscordBinding, TelegramBinding
 from .agents.registry import AgentRegistry
+
+log = logging.getLogger(__name__)
+
+SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 
 SCHEMA = """
@@ -47,13 +53,21 @@ CREATE TABLE IF NOT EXISTS sessions (
     backend TEXT,
     updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS secrets (
+    name TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT
+);
 """
 
 
-def _env_token(token_env: str | None) -> str:
-    if not token_env:
-        return ""
-    return os.environ.get(token_env, "").strip()
+def validate_secret_name(name: str) -> str:
+    cleaned = name.strip()
+    if not SECRET_NAME_RE.match(cleaned):
+        raise ValueError(
+            "Secret name must be an env-style identifier (A-Z, 0-9, _; start with a letter)"
+        )
+    return cleaned
 
 
 class ConfigStore:
@@ -95,6 +109,61 @@ class ConfigStore:
                 "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
+            self._conn.commit()
+
+    def resolve_secret(self, name: str | None) -> str:
+        """Admin SQLite value wins; otherwise process env. Never log the value."""
+        if not name or not str(name).strip():
+            return ""
+        key = str(name).strip()
+        row = self._conn.execute(
+            "SELECT value FROM secrets WHERE name = ?", (key,)
+        ).fetchone()
+        if row is not None:
+            return str(row["value"]).strip()
+        return os.environ.get(key, "").strip()
+
+    def secret_source(self, name: str) -> str | None:
+        """Where the live value comes from: 'admin', 'env', or None."""
+        key = name.strip()
+        if not key:
+            return None
+        row = self._conn.execute(
+            "SELECT value FROM secrets WHERE name = ?", (key,)
+        ).fetchone()
+        if row is not None and str(row["value"]).strip():
+            return "admin"
+        if os.environ.get(key, "").strip():
+            return "env"
+        return None
+
+    def list_secret_names(self) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT name FROM secrets ORDER BY name"
+        ).fetchall()
+        return [str(r["name"]) for r in rows]
+
+    def set_secret(self, name: str, value: str) -> None:
+        key = validate_secret_name(name)
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Secret value cannot be empty")
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO secrets(name, value, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (key, cleaned, now),
+            )
+            self._conn.commit()
+
+    def delete_secret(self, name: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM secrets WHERE name = ?", (name.strip(),))
             self._conn.commit()
 
     def allowlist(self) -> list[int]:
@@ -201,25 +270,35 @@ class ConfigStore:
             skills_list = [s.strip() for s in str(skills_raw).splitlines() if s.strip()]
         discord = None
         if row.get("discord_enabled") and row.get("discord_token_env") and row.get("discord_channel_id"):
-            token = _env_token(row["discord_token_env"])
+            token = self.resolve_secret(row["discord_token_env"])
             if not token:
-                raise SystemExit(f"Environment variable {row['discord_token_env']!r} is required but empty")
-            guild = row.get("discord_guild_id")
-            discord = DiscordBinding(
-                token=token,
-                agent_channel_id=int(row["discord_channel_id"]),
-                guild_id=int(guild) if guild else None,
-            )
+                log.warning(
+                    "Discord token %s missing for agent %s — set it in admin Secrets or .env",
+                    row["discord_token_env"],
+                    row["id"],
+                )
+            else:
+                guild = row.get("discord_guild_id")
+                discord = DiscordBinding(
+                    token=token,
+                    agent_channel_id=int(row["discord_channel_id"]),
+                    guild_id=int(guild) if guild else None,
+                )
         telegram = None
         if row.get("telegram_enabled") and row.get("telegram_token_env"):
-            token = _env_token(row["telegram_token_env"])
+            token = self.resolve_secret(row["telegram_token_env"])
             if not token:
-                raise SystemExit(f"Environment variable {row['telegram_token_env']!r} is required but empty")
-            chat = row.get("telegram_chat_id")
-            telegram = TelegramBinding(
-                token=token,
-                agent_chat_id=int(chat) if chat else None,
-            )
+                log.warning(
+                    "Telegram token %s missing for agent %s — set it in admin Secrets or .env",
+                    row["telegram_token_env"],
+                    row["id"],
+                )
+            else:
+                chat = row.get("telegram_chat_id")
+                telegram = TelegramBinding(
+                    token=token,
+                    agent_chat_id=int(chat) if chat else None,
+                )
         prompt = row.get("system_prompt_file")
         return AgentProfile(
             id=row["id"],
@@ -235,8 +314,8 @@ class ConfigStore:
 
     def list_sessions(self) -> dict[str, dict[str, str | None]]:
         rows = self._conn.execute(
-            "SELECT session_key, session_id, title, model, backend "
-            "FROM sessions ORDER BY session_key"
+            "SELECT session_key, session_id, title, model, backend, updated_at "
+            "FROM sessions ORDER BY updated_at DESC, session_key"
         ).fetchall()
         return {
             str(r["session_key"]): {
@@ -244,6 +323,7 @@ class ConfigStore:
                 "title": r["title"],
                 "model": r["model"],
                 "backend": r["backend"],
+                "updated_at": r["updated_at"],
             }
             for r in rows
         }
@@ -331,6 +411,15 @@ class ConfigStore:
         with self._lock:
             self._conn.execute("DELETE FROM sessions WHERE session_key = ?", (key,))
             self._conn.commit()
+
+    def prune_empty_sessions(self) -> int:
+        """Delete rows with no resume id (overrides-only leftovers)."""
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM sessions WHERE session_id IS NULL OR TRIM(session_id) = ''"
+            )
+            self._conn.commit()
+            return int(cur.rowcount or 0)
 
     def migrate_yaml(self, path: Path) -> bool:
         if not path.is_file() or self.agent_count() > 0:

@@ -59,7 +59,8 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | Cron schedules | ❌ | 🟡 | P2 ★ | apscheduler + stored prompts |
 | Multi-workspace routing | ⚠️ per profile | 🟡 | P2 | Channel → workspace bindings |
 | OpenClaw-style bindings | ⚠️ 1:1 bots | 🟠 | P3 | YAML `routing:` rules |
-| Notifications on job done | ❌ | 🟢 | P3 ★ | Discord ping when import finishes |
+| Notifications on job done | ✅ | — | **done** | Same-bubble `@you` + duration; skip Send now / `/close` |
+| Session hygiene `/close` | ✅ | — | **done** | `/close` + admin prune empty |
 | Interactive approve/deny | ❌ | 🔴 | defer | Needs SDK bridge; CLI is force-or-nothing |
 | Persistent memory | ❌ | 🟠 | defer | Files/skills first; not full Hermes |
 | MCP tool bridge | ❌ | 🔴 | defer | OpenClaw territory |
@@ -95,7 +96,8 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 8. ~~**Model selection**~~ ✅ — admin default models + `/model` in thread  
 9. ~~**Queue Send now**~~ ✅ — Discord Stop & send + Drop on queued follow-ups  
 10. ~~**Per-thread `/backend`**~~ ✅  
-11. Phase 2/3: session hygiene, master slash dispatch, bindings  
-12. cursor-sdk / cron / notifications  
+11. ~~**Job-done ping + `/close`**~~ ✅  
+12. Phase 2/3: master slash dispatch, bindings  
+13. cursor-sdk / cron  
 
 See [ROADMAP.md](./ROADMAP.md) — **Decisions (2026-08-12)** + billing/phase detail.

@@ -6,9 +6,9 @@ import os
 import secrets
 import time
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
-
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -138,7 +138,7 @@ pre {
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
 }
 label { display: block; margin: 0.75rem 0; font-weight: 550; font-size: 0.92rem; }
-input[type=text], textarea {
+input[type=text], input[type=password], textarea {
   display: block; width: 100%; max-width: 36rem; margin-top: 0.35rem;
   padding: 0.55rem 0.7rem; border: 1px solid var(--border); border-radius: 8px;
   font: inherit; background: var(--surface);
@@ -215,7 +215,7 @@ body.settings-open .settings-panel { transform: translateX(0); }
   .header-actions { width: 100%; }
   nav { width: 100%; }
   .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  input[type=text], textarea { max-width: none; }
+  input[type=text], input[type=password], textarea { max-width: none; }
   .desk-only { display: none !important; }
   .job-cards { display: grid; }
   table { min-width: 0; }
@@ -229,7 +229,20 @@ body.settings-open .settings-panel { transform: translateX(0); }
 """
 
 
-def _admin_password() -> str | None:
+WELL_KNOWN_SECRETS = (
+    "OPENROUTER_API_KEY",
+    "CURSOR_API_KEY",
+    "ADMIN_PASSWORD",
+    "DISCORD_TOKEN_MANAGER",
+    "DISCORD_TOKEN_MUSIC",
+    "TELEGRAM_TOKEN_MANAGER",
+    "TELEGRAM_TOKEN_MUSIC",
+)
+
+
+def _admin_password(db: ConfigStore | None = None) -> str | None:
+    if db is not None:
+        return db.resolve_secret("ADMIN_PASSWORD") or None
     return os.environ.get("ADMIN_PASSWORD", "").strip() or None
 
 
@@ -237,7 +250,8 @@ def require_auth(
     request: Request,
     credentials: HTTPBasicCredentials | None = Depends(security),
 ) -> None:
-    password = _admin_password()
+    db = getattr(request.app.state, "db", None)
+    password = _admin_password(db if isinstance(db, ConfigStore) else None)
     if not password:
         return
     if credentials is None:
@@ -274,6 +288,7 @@ def _truthy_setting(raw: str | None, default: bool = True) -> bool:
 
 def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> FastAPI:
     app = FastAPI(title="zen-agent-bot admin", docs_url=None, redoc_url=None)
+    app.state.db = db
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -281,6 +296,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         streaming = _truthy_setting(db.get_setting("streaming_enabled"), True)
         if gateway is not None:
             streaming = gateway.config.streaming_enabled
+        job_ping = _truthy_setting(db.get_setting("job_done_ping"), True)
         max_jobs = db.get_setting("max_concurrent_jobs", "2") or "2"
         if gateway is not None:
             max_jobs = str(gateway.config.max_concurrent_jobs)
@@ -303,16 +319,17 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             if env_model_hits
             else ""
         )
-        pw = _admin_password()
+        pw = _admin_password(db)
         auth_html = (
             '<div class="callout">Auth protected (<code>ADMIN_PASSWORD</code> set).</div>'
             if pw
             else (
-                '<div class="callout warn">No <code>ADMIN_PASSWORD</code> — set one in '
-                "<code>.env</code> then restart.</div>"
+                '<div class="callout warn">No <code>ADMIN_PASSWORD</code> — set one under '
+                "<a href=\"/secrets\">Secrets</a> (live) or in <code>.env</code>.</div>"
             )
         )
         streaming_checked = "checked" if streaming else ""
+        job_ping_checked = "checked" if job_ping else ""
         open_script = (
             "document.body.classList.add('settings-open');" if open_on_load else ""
         )
@@ -332,12 +349,14 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
       <div class="settings-links">
         <a href="/agents">Agents<span>Profiles, Discord/Telegram tokens &amp; channels</span></a>
         <a href="/allowlist">Allowlist<span>Who can message the bots</span></a>
+        <a href="/secrets">Secrets<span>API keys &amp; bot tokens (masked)</span></a>
       </div>
 
       <h3 class="section">Gateway</h3>
       <p class="hint">Saved to SQLite. Streaming &amp; models apply live; concurrent jobs &amp; guild need a restart.</p>
       <form method="post" action="/settings/save">
         <label><input type="checkbox" name="streaming_enabled" {streaming_checked}> Discord/Telegram streaming status edits</label>
+        <label><input type="checkbox" name="job_done_ping" {job_ping_checked}> Append @ you on the status bubble when a job finishes (successes ≥ 1 min, or errors)</label>
         <label>Max concurrent jobs
           <input type="text" name="max_concurrent_jobs" value="{html.escape(max_jobs)}" inputmode="numeric" pattern="[0-9]+" required>
         </label>
@@ -365,8 +384,9 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
       <p class="hint">DB <code>{html.escape(str(db.path))}</code></p>
       <div class="callout">
         <strong>Live vs restart</strong><br>
-        Allowlist, session clears, and model defaults apply immediately.
-        New bots / token or channel changes need a host restart
+        Allowlist, session clears, model defaults, OpenRouter key, and admin
+        password apply immediately. Discord/Telegram <em>token values</em> need a
+        host restart after saving
         (<code>systemctl restart zen-agent-bot</code> or Discord <code>/rebuild</code>).
       </div>
       <div class="callout">
@@ -481,7 +501,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         allowed = db.allowlist()
         sessions = db.list_sessions()
         tg_ready = sum(1 for a in agents if a.get("telegram_token_env"))
-        pw = _admin_password()
+        pw = _admin_password(db)
         running = queued = 0
         if gateway is not None:
             st = gateway.live_status()
@@ -492,7 +512,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             ('Auth protected (ADMIN_PASSWORD set)', "")
             if pw
             else (
-                "No ADMIN_PASSWORD — set one in <code>.env</code> then restart.",
+                'No ADMIN_PASSWORD — set one under <a href="/secrets">Secrets</a>.',
                 "warn",
             )
         )
@@ -537,6 +557,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
     @app.post("/settings/save")
     async def settings_save(
         streaming_enabled: str | None = Form(None),
+        job_done_ping: str | None = Form(None),
         max_concurrent_jobs: str = Form("2"),
         discord_guild_id: str = Form(""),
         cursor_model: str = Form(""),
@@ -551,6 +572,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             raise HTTPException(400, "max_concurrent_jobs must be an integer") from exc
         stream_on = streaming_enabled is not None
         db.set_setting("streaming_enabled", "true" if stream_on else "false")
+        db.set_setting("job_done_ping", "true" if job_done_ping is not None else "false")
         db.set_setting("max_concurrent_jobs", str(jobs))
         guild = discord_guild_id.strip()
         if guild:
@@ -735,6 +757,101 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             raise HTTPException(400, str(exc)) from exc
         return RedirectResponse("/allowlist?saved=1", status_code=303)
 
+    def _secret_names() -> list[str]:
+        names = set(WELL_KNOWN_SECRETS)
+        names.update(db.list_secret_names())
+        for row in db.list_agent_rows():
+            for key in ("discord_token_env", "telegram_token_env"):
+                raw = str(row.get(key) or "").strip()
+                if raw:
+                    names.add(raw)
+        return sorted(names)
+
+    @app.get("/secrets", response_class=HTMLResponse)
+    async def secrets_page(
+        request: Request, _: None = Depends(require_auth)
+    ) -> HTMLResponse:
+        rows: list[str] = []
+        for name in _secret_names():
+            source = db.secret_source(name)
+            if source == "admin":
+                status_html = '<span class="badge on">set (admin)</span>'
+            elif source == "env":
+                status_html = '<span class="badge">set (env)</span>'
+            else:
+                status_html = '<span class="badge warn">missing</span>'
+            clear_btn = ""
+            if source == "admin":
+                clear_btn = (
+                    f"<form method='post' action='/secrets/delete' class='row-actions'>"
+                    f"<input type='hidden' name='name' value='{html.escape(name)}'>"
+                    f"<button type='submit' class='danger'>Clear</button></form>"
+                )
+            rows.append(
+                "<tr>"
+                f"<td><code>{html.escape(name)}</code></td>"
+                f"<td>{status_html}</td>"
+                "<td>"
+                f"<form method='post' action='/secrets/save' class='row-actions'>"
+                f"<input type='hidden' name='name' value='{html.escape(name)}'>"
+                f"<input type='password' name='value' autocomplete='new-password' "
+                f"placeholder='new value' required>"
+                f"<button type='submit'>Save</button></form>"
+                f"{clear_btn}"
+                "</td></tr>"
+            )
+        msg = ""
+        if request.query_params.get("saved"):
+            msg = "Secret saved. OpenRouter / admin password apply on the next request; Discord/Telegram tokens need /rebuild."
+        if request.query_params.get("cleared"):
+            msg = "Admin secret cleared (env fallback still used if set)."
+        err = request.query_params.get("error")
+        banner_class = "warn" if err else ""
+        if err:
+            msg = html.escape(err)
+        body = f"""
+        <p class="hint">Values are stored in SQLite (<code>gateway.db</code>, gitignored) and
+        never shown here. Admin value wins over <code>.env</code>. Clear drops the admin
+        copy only.</p>
+        <div class="table-wrap">
+          <table>
+            <tr><th>Name</th><th>Status</th><th>Set / replace</th></tr>
+            {"".join(rows)}
+          </table>
+        </div>
+        <h3 class="section">Add another key</h3>
+        <form method="post" action="/secrets/save">
+          <label>Name
+            <input type="text" name="name" required pattern="[A-Z][A-Z0-9_]*"
+              placeholder="MY_API_KEY" autocomplete="off"></label>
+          <label>Value
+            <input type="password" name="value" required autocomplete="new-password"></label>
+          <button type="submit">Save secret</button>
+        </form>
+        """
+        return page("Secrets", body, msg, active="allowlist", banner_class=banner_class)
+
+    @app.post("/secrets/save")
+    async def secrets_save(
+        name: str = Form(...),
+        value: str = Form(...),
+        _: None = Depends(require_auth),
+    ) -> RedirectResponse:
+        try:
+            db.set_secret(name, value)
+        except ValueError as exc:
+            return RedirectResponse(
+                f"/secrets?error={quote(str(exc), safe='')}", status_code=303
+            )
+        return RedirectResponse("/secrets?saved=1", status_code=303)
+
+    @app.post("/secrets/delete")
+    async def secrets_delete(
+        name: str = Form(...), _: None = Depends(require_auth)
+    ) -> RedirectResponse:
+        db.delete_secret(name)
+        return RedirectResponse("/secrets?cleared=1", status_code=303)
+
     @app.get("/agents", response_class=HTMLResponse)
     async def agents_page(
         request: Request, _: None = Depends(require_auth)
@@ -757,8 +874,10 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             )
         msg = "Saved." if request.query_params.get("saved") else ""
         body = f"""
-        <p class="hint">Profiles in SQLite. Tokens stay in <code>.env</code> (via <code>token_env</code>).
-        <code>openrouter</code> needs <code>OPENROUTER_API_KEY</code>; <code>claude-cli</code> needs host <code>claude</code> login.</p>
+        <p class="hint">Profiles in SQLite. Put token <em>values</em> in
+        <a href="/secrets">Secrets</a> (or <code>.env</code>); here you only name the key
+        (<code>token_env</code>). <code>openrouter</code> needs <code>OPENROUTER_API_KEY</code>;
+        <code>claude-cli</code> needs host <code>claude</code> login.</p>
         <p><a class="btn" href="/agents/new">Add agent</a></p>
         <div class="table-wrap">
           <table>
@@ -803,8 +922,8 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
 
           <h3 class="section">Telegram</h3>
           <div class="callout warn">
-            Optional — create bots via @BotFather, add <code>TELEGRAM_TOKEN_*</code> to
-            <code>.env</code>, allowlist your Telegram user ID, enable here, then restart.
+            Optional — create bots via @BotFather, set <code>TELEGRAM_TOKEN_*</code> in
+            <a href="/secrets">Secrets</a>, allowlist your Telegram user ID, enable here, then restart.
           </div>
           <label><input type="checkbox" name="telegram_enabled" {checked('telegram_enabled')}> Enabled</label>
           <label>Token env
@@ -873,22 +992,30 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         for key, row in data.items():
             sid = row.get("session_id") or ""
             model = row.get("model") or ""
+            backend = row.get("backend") or ""
+            updated = (row.get("updated_at") or "")[:19].replace("T", " ")
             rows.append(
                 f"<tr><td><code title=\"{html.escape(key)}\">{html.escape(_short_key(key, 40))}</code></td>"
                 f"<td>{html.escape(row.get('title') or '')}</td>"
                 f"<td><code>{html.escape(sid[:16])}{'…' if len(sid) > 16 else ''}</code></td>"
+                f"<td>{html.escape(backend) or '—'}</td>"
                 f"<td>{html.escape(model) or '—'}</td>"
+                f"<td>{html.escape(updated) or '—'}</td>"
                 f"<td><form method='post' action='/sessions/clear' class='row-actions'>"
                 f"<input type='hidden' name='key' value='{html.escape(key)}'>"
                 f"<button type='submit' class='danger'>Clear</button></form></td></tr>"
             )
         body = f"""
-        <p class="hint">Thread ↔ Cursor <code>--resume</code> / OpenRouter session IDs (SQLite).
-        Clear deletes resume <em>and</em> <code>/model</code> override.</p>
+        <p class="hint">Thread ↔ backend session IDs. In chat, <code>/close</code> drops
+        resume + <code>/model</code> + <code>/backend</code>. <code>/new</code> only drops resume.
+        Clear here is the same as <code>/close</code>.</p>
+        <form method="post" action="/sessions/prune" class="row-actions" style="margin-bottom:1rem">
+          <button type="submit" class="danger">Prune empty (no resume id)</button>
+        </form>
         <div class="table-wrap">
           <table>
-            <tr><th>Key</th><th>Title</th><th>Session</th><th>Model</th><th></th></tr>
-            {"".join(rows) or "<tr><td colspan=5><em>none</em></td></tr>"}
+            <tr><th>Key</th><th>Title</th><th>Session</th><th>Backend</th><th>Model</th><th>Updated</th><th></th></tr>
+            {"".join(rows) or "<tr><td colspan=7><em>none</em></td></tr>"}
           </table>
         </div>
         """
@@ -899,6 +1026,11 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         key: str = Form(...), _: None = Depends(require_auth)
     ) -> RedirectResponse:
         db.clear_session(key)
+        return RedirectResponse("/sessions", status_code=303)
+
+    @app.post("/sessions/prune")
+    async def sessions_prune(_: None = Depends(require_auth)) -> RedirectResponse:
+        db.prune_empty_sessions()
         return RedirectResponse("/sessions", status_code=303)
 
     @app.get("/health")

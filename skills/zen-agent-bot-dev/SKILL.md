@@ -39,11 +39,11 @@ Discord/Telegram → transports → Gateway (queue + sessions) → backends (cur
 
 ## Config split
 
-| SQLite (`gateway.db`) | `.env` only |
+| SQLite (`gateway.db`) | `.env` / systemd (fallback) |
 |------------------------|-------------|
-| Agent profiles, channels, token_env **names** | `DISCORD_TOKEN_*`, `TELEGRAM_TOKEN_*` |
-| Allowlist user IDs | `ADMIN_PASSWORD`, `DISCORD_GUILD_ID` |
-| Sessions, settings | Cursor mount paths, `AGENT_*` overrides |
+| Agent profiles, channels, token_env **names** | Process paths: `AGENT_BIN`, `AGENT_WORKSPACE`, `ADMIN_LISTEN` |
+| Allowlist, sessions, settings, **secret values** | Env still works; admin Secrets **wins** if set |
+| Secret names: `OPENROUTER_API_KEY`, `CURSOR_API_KEY`, `DISCORD_TOKEN_*`, `TELEGRAM_TOKEN_*`, `ADMIN_PASSWORD` | `DISCORD_GUILD_ID` / `AGENT_MODEL` env still override settings |
 
 First-run seed: `data/config.yaml` → migrates to SQLite once if DB empty.
 
@@ -163,16 +163,14 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 5. ~~**Claude Code backend**~~ ✅ — `claude -p`; set agent `default_backend` to `claude-cli` (needs host `claude` login)
 6. ~~**File attachments**~~ ✅ — Discord/Telegram files → `data/attachments/`; paths injected into prompt (images via Read; other files by path; 25 MiB / 10 files)
 
-**Done (out of prior P2):** OpenRouter chat backend; **model selection**; **queue Send now** (Discord Stop & send + Drop); **per-thread `/backend`**.
+**Done (out of prior P2):** OpenRouter chat backend; **model selection**; **queue Send now**; **per-thread `/backend`**; **job-done ping**; **`/close`** + admin prune empty.
 
 **P2 / Phase 2–3 (wanted)**
 
-- Session hygiene — prune stale SQLite mappings, `/close`, admin stale-sessions
 - Master slash dispatch — `/run <agent> …` from manager (keep 1-bot-per-profile primary)
 - OpenClaw-style bindings / channel→agent routing
 - cursor-sdk local (stream + cancel)
 - Cron / scheduled jobs
-- Job-done Discord notification
 - Optional @mention wake in shared channels (default stays dedicated `#agent` channels)
 
 **Out of scope / defer**
@@ -203,6 +201,7 @@ Logs: `journalctl -u zen-agent-bot -f`, `data/logs/rebuild.log`, `journalctl -u 
 - `systemctl is-active zen-agent-bot` + Discord bots connect
 - Post in `#agent` → thread + streaming status + final reply
 - Follow-up while busy → queued message + **Send now** / **Drop**; then runs
+- Job finishes → same status bubble appends `✅ Done @you · 3m`; `/close` drops resume + overrides
 - Admin: allowlist add/remove without restart
 - After code change: `/rebuild` or `sudo systemctl restart zen-agent-bot`; verify `/health`
 - `git push` works from agent jobs (host SSH keys)
