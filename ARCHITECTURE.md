@@ -257,7 +257,7 @@ Billing reminder: [ROADMAP.md](./ROADMAP.md#billing--quota-important).
 - Backend default **models** (Settings; live apply)
 - Transport tokens (`*_env` names) + **Secrets** page (values masked; SQLite, admin wins over `.env`)
 - Routing rules
-- Session list / clear / prune empty (`/close` in chat)
+- Session list / clear / prune empty (`/close` archives Discord + keeps `--resume`)
 - Job queue / logs
 - Test button: “ping backend” (`agent status`, `claude --version`)
 

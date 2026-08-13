@@ -60,7 +60,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | Multi-workspace routing | ⚠️ per profile | 🟡 | P2 | Channel → workspace bindings |
 | OpenClaw-style bindings | ⚠️ 1:1 bots | 🟠 | P3 | YAML `routing:` rules |
 | Notifications on job done | ✅ | — | **done** | Same-bubble `@you` + duration; skip Send now / `/close` |
-| Session hygiene `/close` | ✅ | — | **done** | `/close` + admin prune empty |
+| Session hygiene `/close` | ✅ | — | **done** | Archive Discord thread; keep `--resume`; admin Clear deletes mapping |
 | Interactive approve/deny | ❌ | 🔴 | defer | Needs SDK bridge; CLI is force-or-nothing |
 | Persistent memory | ❌ | 🟠 | defer | Files/skills first; not full Hermes |
 | MCP tool bridge | ❌ | 🔴 | defer | OpenClaw territory |

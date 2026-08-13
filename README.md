@@ -49,7 +49,7 @@ uv run zen-agent-bot
 | **Follow-up** | Reply in the same thread (`--resume`). If a job is running, your message is **queued** — **Send now** stops the current job and runs this one (Cursor Stop & send). **Drop** unqueues it |
 | **Attach files** | Drop images/docs in the thread (or with your message) — saved under `data/attachments/` and paths go into the prompt |
 | **Fresh session** | `/new` in the thread (keeps `/model` and `/backend` overrides) |
-| **Close session** | `/close` — drop resume + overrides; also admin **Sessions** |
+| **Close session** | `/close` — archive Discord thread, keep `--resume`; admin **Sessions → Clear** forgets the mapping |
 | **Model** | `/model` lists Cursor CLI models · `/model composer-2.5` this thread · `/model clear` |
 | **Backend** | `/backend` · `/backend openrouter` this thread · `/backend clear` (clears resume when switching) |
 | **Cancel in-flight job** | `/cancel` in the thread |

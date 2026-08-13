@@ -201,7 +201,7 @@ Logs: `journalctl -u zen-agent-bot -f`, `data/logs/rebuild.log`, `journalctl -u 
 - `systemctl is-active zen-agent-bot` + Discord bots connect
 - Post in `#agent` → thread + streaming status + final reply
 - Follow-up while busy → queued message + **Send now** / **Drop**; then runs
-- Job finishes → same status bubble appends `✅ Done @you · 3m`; `/close` drops resume + overrides
+- Job finishes → same status bubble appends `✅ Done @you · 3m`; `/close` archives Discord thread and keeps `--resume`
 - Admin: allowlist add/remove without restart
 - After code change: `/rebuild` or `sudo systemctl restart zen-agent-bot`; verify `/health`
 - `git push` works from agent jobs (host SSH keys)
