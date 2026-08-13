@@ -97,7 +97,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 9. ~~**Queue Send now**~~ ✅ — Discord Stop & send + Drop on queued follow-ups  
 10. ~~**Per-thread `/backend`**~~ ✅  
 11. ~~**Job-done ping + `/close`**~~ ✅  
-12. Phase 2/3: master slash dispatch, bindings  
-13. cursor-sdk / cron  
+12. ~~**One-bot Discord + `/music` `/general` `/run`**~~ ✅  
+13. Phase 2/3: extra bindings · cursor-sdk / cron  
 
 See [ROADMAP.md](./ROADMAP.md) — **Decisions (2026-08-12)** + billing/phase detail.

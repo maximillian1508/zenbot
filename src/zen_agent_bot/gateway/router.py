@@ -237,7 +237,10 @@ class Gateway:
                 f"• **{profile.display_name}** (`{profile.id}`) — {role} · {transport_str}"
             )
         lines.append("")
-        lines.append("Message the bot for each agent directly (one bot user per profile).")
+        lines.append(
+            "One Discord bot. `/music`, `/general`, `/manager` (or `/run`) open a "
+            "thread in that agent's channel. Plain messages in `#agent` are manager."
+        )
         return "\n".join(lines)
 
     async def _ensure_session_worker(self, session_key: str) -> _SessionState:

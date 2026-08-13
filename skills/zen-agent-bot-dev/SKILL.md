@@ -31,7 +31,7 @@ Discord/Telegram → transports → Gateway (queue + sessions) → backends (cur
                               FastAPI admin UI (:8787)
 ```
 
-- **One Discord bot token per agent profile** (manager, music, general, …)
+- **One Discord bot** (shared token) + channel/`/music`/`/general` → profile. Distinct tokens still start extra clients.
 - **SOUL** = `agents/<id>/SOUL.md`; **skills** = extra markdown injected every prompt (paths in SQLite `agents.skills`)
 - **Sessions** = per thread key → Cursor `--resume` session_id
 - **Per-thread queue** = follow-ups while busy auto-run next (same thread)
@@ -167,11 +167,11 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 
 **P2 / Phase 2–3 (wanted)**
 
-- Master slash dispatch — `/run <agent> …` from manager (keep 1-bot-per-profile primary)
-- OpenClaw-style bindings / channel→agent routing
+- ~~Master slash dispatch~~ ✅ — one Discord bot; `/music` `/general` `/manager` `/run`
+- OpenClaw-style extra bindings (non-home channels)
 - cursor-sdk local (stream + cancel)
 - Cron / scheduled jobs
-- Optional @mention wake in shared channels (default stays dedicated `#agent` channels)
+- Optional @mention wake in shared channels (default stays dedicated home channels)
 
 **Out of scope / defer**
 

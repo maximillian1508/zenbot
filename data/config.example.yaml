@@ -58,7 +58,7 @@ agents:
     skills: []
     discord:
       enabled: true
-      token_env: DISCORD_TOKEN_MUSIC
+      token_env: DISCORD_TOKEN_MANAGER
       agent_channel_id: 1234567890123456790
     telegram:
       enabled: false
@@ -74,7 +74,7 @@ agents:
     skills: []
     discord:
       enabled: true
-      token_env: DISCORD_TOKEN_GENERAL
+      token_env: DISCORD_TOKEN_MANAGER
       agent_channel_id: 1234567890123456791
     telegram:
       enabled: false

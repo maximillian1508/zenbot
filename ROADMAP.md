@@ -114,7 +114,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 
 | Feature | Effort | Note |
 |---------|--------|------|
-| Master slash dispatch (`/run music …`) | 🟡 | Convenience on manager; keep 1-bot-per-profile |
+| Master slash dispatch (`/run music …`) | ✅ | One Discord bot; `/music` `/general` `/manager` + channel homes |
 | OpenClaw-style bindings | 🟠 | Channel → agent/workspace |
 | @mention wake in shared channels | 🟡 | Optional; dedicated `#agent` channels stay default |
 | Interactive tool approve (like CursorRemote) | 🔴 | **P3+ after cursor-sdk**; Discord Accept/Deny; CLI `--force` = no prompts |
@@ -185,7 +185,7 @@ routing:
 9. ~~**Queue “Send now” button**~~ ✅ — Discord Stop & send (cancel in-flight, run this follow-up)
 10. ~~**Per-thread `/backend`**~~ ✅
 11. ~~**Job-done ping + `/close`**~~ ✅
-12. Master slash dispatch (Phase 2/3)
+12. ~~**One-bot Discord + slash dispatch**~~ ✅
 13. cursor-sdk / cron
 
 ---
@@ -197,7 +197,7 @@ Locked from planning with Maxi — keep these when picking backlog work.
 | Topic | Decision |
 |-------|----------|
 | **Session / thread hygiene** | Defer to **Phase 2/3**. Today: Discord 7-day auto-archive + `/new` + admin clear is enough. Later: prune stale SQLite rows, `/close`, admin stale-sessions view. |
-| **Multi-agent UX** | Keep **one Discord bot per profile** as primary. Optional later: manager slash to run specialists (`/run music …`) as convenience — not a replacement. |
+| **Multi-agent UX** | **One Discord bot**, many profiles. Channel home + `/music` `/general` `/manager` (plain `#agent` = manager). Distinct tokens still allowed. |
 | **@mention wake (Claude-tag style)** | **Not needed** for now. Dedicated `#agent` / `#music-agent` channels are the wake boundary. Optional P2/P3 if we want bots in shared channels. |
 | **Self-rebuild mid-chat** | Flag file `data/REQUEST_REBUILD` + host systemd path unit → `scripts/deploy.sh`. Manager `/rebuild`. No Docker socket in the bot. |
 | **Persistent memory / @mention filtering in-model** | Out of scope. Gateway filters by channel/allowlist; no Hermes memory. |
@@ -207,7 +207,7 @@ Locked from planning with Maxi — keep these when picking backlog work.
 
 **Done extras:** OpenRouter chat backend; Claude Code backend; file attachments (Discord/TG → `data/attachments/`, paths in prompt; 25 MiB / 10 files).
 
-**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · ~~queue Send now button~~ ✅ · ~~per-thread `/backend`~~ ✅ · ~~job-done ping~~ ✅ · ~~`/close` / session hygiene~~ ✅ · master slash dispatch · bindings/routing · cursor-sdk · cron · OpenRouter.
+**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · ~~queue Send now button~~ ✅ · ~~per-thread `/backend`~~ ✅ · ~~job-done ping~~ ✅ · ~~`/close` / session hygiene~~ ✅ · ~~one-bot Discord + `/music` `/general`~~ ✅ · bindings/routing · cursor-sdk · cron · OpenRouter.
 
 ### Model selection (2026-08-13)
 

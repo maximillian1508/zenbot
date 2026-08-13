@@ -45,7 +45,7 @@ uv run zen-agent-bot
 
 | Action | How |
 |--------|-----|
-| **New task** | Post in the agent channel → bot creates a **thread** and runs Cursor agent |
+| **New task** | Post in `#agent` / `#music-agent` / `#general-agent`, or `/music` `/general` `/manager` → bot opens a **thread** in that home |
 | **Follow-up** | Reply in the same thread (`--resume`). If a job is running, your message is **queued** — **Send now** stops the current job and runs this one (Cursor Stop & send). **Drop** unqueues it |
 | **Attach files** | Drop images/docs in the thread (or with your message) — saved under `data/attachments/` and paths go into the prompt |
 | **Fresh session** | `/new` in the thread (keeps `/model` and `/backend` overrides) |
@@ -56,7 +56,7 @@ uv run zen-agent-bot
 | **Restart gateway** | `/rebuild` on **manager** (host `systemctl restart`) |
 | **Check session** | `/status` (Discord) or admin **Status** page |
 | **Live jobs / errors** | Admin UI → **Status** (auto-refresh) |
-| **List fleet** | `/agents` on the **manager** bot |
+| **List fleet** | `/agents` |
 
 Status messages **stream live** during runs (`STREAMING=false` to disable). Long runs and errors append `✅ Done @you · 3m 12s` on the **same** status bubble (not a new message). Send now / `/close` cancellations skip the ping.
 

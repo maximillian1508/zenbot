@@ -878,7 +878,9 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         body = f"""
         <p class="hint">Profiles in SQLite. Put token <em>values</em> in
         <a href="/secrets">Secrets</a> (or <code>.env</code>); here you only name the key
-        (<code>token_env</code>). <code>openrouter</code> needs <code>OPENROUTER_API_KEY</code>;
+        (<code>token_env</code>). Same <code>token_env</code> = <strong>one Discord bot</strong>;
+        channel id + <code>/music</code> / <code>/general</code> pick the profile.
+        <code>openrouter</code> needs <code>OPENROUTER_API_KEY</code>;
         <code>claude-cli</code> needs host <code>claude</code> login.</p>
         <p><a class="btn" href="/agents/new">Add agent</a></p>
         <div class="table-wrap">

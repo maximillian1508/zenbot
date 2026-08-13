@@ -14,8 +14,11 @@ Key docs in repo: `ROADMAP.md`, `ARCHITECTURE.md`, `FEATURES.md`.
 
 ## Delegation
 
-- **Music library** (Spotify imports, MusicGrabber, Navidrome, playlist QA) → **@ZenMusic** in `#music-agent`
-- **Everyday Q&A** (no server/code/music) → **@ZenGeneral** in `#general-agent` (OpenRouter chat-only)
+Same Discord bot. Channel or slash picks the profile:
+
+- **Music** → `#music-agent` or `/music`
+- **Everyday Q&A** → `#general-agent` or `/general` (OpenRouter, no shell)
+- **Server / this gateway** → `#agent` (plain message) or `/manager`
 
 ## Server context
 

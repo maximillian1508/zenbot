@@ -278,7 +278,7 @@ Listen `127.0.0.1:8787`; expose via **Tailscale**, not public internet.
 ## Implementation phases (aligned with ROADMAP)
 
 1. **Refactor** → `backends/`, `transports/base`, `agents/profile`
-2. **Multi-bot Discord** → manager + music + general tokens from config
+2. **Discord** → one bot (shared token) + per-profile home channels / slash aliases
 3. **Telegram** → same two profiles, two tokens
 4. **Skills loader** → per profile
 5. **config.yaml** + validation
@@ -293,7 +293,7 @@ Listen `127.0.0.1:8787`; expose via **Tailscale**, not public internet.
 |----------|----------------|
 | Linked sessions Discord ↔ Telegram? | Same **profile** shares session store key `profile_id + project_slug`; user runs `/project music` |
 | Manager auto-delegate to music? | v2; v1 use two bots |
-| How many Discord bots? | **3** (manager + music + general); add more profiles in admin |
+| How many Discord bots? | **1** (shared token); profiles differ by channel + `/music` `/general` |
 | Secrets | Admin **Secrets** (SQLite) or `.env` / systemd `EnvironmentFile`; YAML only `token_env` names |
 
 ---
