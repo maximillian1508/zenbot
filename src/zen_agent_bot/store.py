@@ -14,6 +14,7 @@ import yaml
 
 from .agents.profile import AgentProfile, DiscordBinding, TelegramBinding
 from .agents.registry import AgentRegistry
+from .chat_history import CHAT_TURN_MAX, CHAT_TURN_MAX_CHARS, clip_turn, window_turns
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +59,14 @@ CREATE TABLE IF NOT EXISTS secrets (
     value TEXT NOT NULL,
     updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS chat_turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_key TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns(session_key, id);
 CREATE TABLE IF NOT EXISTS schedules (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -424,12 +433,75 @@ class ConfigStore:
                 """,
                 (now, key),
             )
+            self._conn.execute("DELETE FROM chat_turns WHERE session_key = ?", (key,))
             self._conn.commit()
 
     def clear_session(self, key: str) -> None:
         with self._lock:
+            self._conn.execute("DELETE FROM chat_turns WHERE session_key = ?", (key,))
             self._conn.execute("DELETE FROM sessions WHERE session_key = ?", (key,))
             self._conn.commit()
+
+    def append_chat_turn(self, session_key: str, role: str, content: str) -> None:
+        body = clip_turn(content)
+        if role not in ("user", "assistant") or not body:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO chat_turns(session_key, role, content, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (session_key, role, body, now),
+            )
+            self._prune_chat_turns_locked(session_key)
+            self._conn.commit()
+
+    def list_chat_turns(self, session_key: str) -> list[dict[str, str]]:
+        rows = self._conn.execute(
+            """
+            SELECT role, content FROM chat_turns
+            WHERE session_key = ?
+            ORDER BY id ASC
+            """,
+            (session_key,),
+        ).fetchall()
+        return window_turns(
+            [{"role": str(r["role"]), "content": str(r["content"])} for r in rows]
+        )
+
+    def clear_chat_turns(self, session_key: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM chat_turns WHERE session_key = ?", (session_key,))
+            self._conn.commit()
+
+    def _prune_chat_turns_locked(self, session_key: str) -> None:
+        rows = self._conn.execute(
+            """
+            SELECT id, content FROM chat_turns
+            WHERE session_key = ?
+            ORDER BY id ASC
+            """,
+            (session_key,),
+        ).fetchall()
+        drop: list[int] = []
+        keep = list(rows)
+        extra = len(keep) - CHAT_TURN_MAX
+        if extra > 0:
+            drop.extend(int(r["id"]) for r in keep[:extra])
+            keep = keep[extra:]
+        total = sum(len(str(r["content"] or "")) for r in keep)
+        while len(keep) > 1 and total > CHAT_TURN_MAX_CHARS:
+            dropped = keep.pop(0)
+            drop.append(int(dropped["id"]))
+            total -= len(str(dropped["content"] or ""))
+        if drop:
+            placeholders = ",".join("?" * len(drop))
+            self._conn.execute(
+                f"DELETE FROM chat_turns WHERE id IN ({placeholders})",
+                drop,
+            )
 
     def _schedule_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         data = dict(row)

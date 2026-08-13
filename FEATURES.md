@@ -58,6 +58,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | cursor-sdk local | ❌ | 🟡 | P2 ★ | Stream + cancel; same subscription |
 | Cron schedules | ✅ | — | **done** | Admin Schedules + `/schedule`; new Discord thread per run |
 | Thread handoff | ✅ | — | **done** | `/handoff` agent picker + **Ask Manager** button; new public thread + transcript |
+| OpenRouter chat window | ✅ | — | **done** | SQLite last ~20 turns per thread; `/new` / backend switch / admin Clear wipe |
 | Multi-workspace routing | ⚠️ per profile | 🟡 | P2 | Channel → workspace bindings |
 | OpenClaw-style bindings | ⚠️ 1:1 bots | 🟠 | P3 | YAML `routing:` rules |
 | Notifications on job done | ✅ | — | **done** | Same-bubble `@you` + duration; skip Send now / `/close` |
@@ -101,6 +102,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 12. ~~**One-bot Discord + `/music` `/general` `/run`**~~ ✅  
 13. ~~**Cron / scheduled jobs**~~ ✅  
 14. ~~**`/handoff` + Ask Manager**~~ ✅  
-15. Phase 2/3: extra bindings · cursor-sdk  
+15. ~~**OpenRouter chat-turn window**~~ ✅  
+16. Phase 2/3: extra bindings · cursor-sdk  
 
 See [ROADMAP.md](./ROADMAP.md) — **Decisions (2026-08-12)** + billing/phase detail.

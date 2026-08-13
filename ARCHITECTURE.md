@@ -260,6 +260,7 @@ Billing reminder: [ROADMAP.md](./ROADMAP.md#billing--quota-important).
 - Session list / clear / prune empty (`/close` archives Discord + keeps `--resume`)
 - **Schedules** (cron) — each run opens a new Discord thread; live status on running jobs
 - **Handoff** — `/handoff` + Ask Manager; transcript injected into a new public thread
+- **OpenRouter history** — `chat_turns` table; last ~20 user/assistant messages per session_key
 - Job queue / logs
 - Test button: “ping backend” (`agent status`, `claude --version`)
 

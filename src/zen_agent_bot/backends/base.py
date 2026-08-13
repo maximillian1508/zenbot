@@ -41,4 +41,5 @@ class AgentBackend(Protocol):
         cancel_event: asyncio.Event | None = None,
         register_proc: RegisterProc | None = None,
         model: str | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> AgentRunResult: ...

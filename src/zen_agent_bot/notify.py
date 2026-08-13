@@ -62,12 +62,13 @@ def format_close_reply(
     if archived:
         lines.append(
             "Discord thread archived. Send a message to unarchive and continue "
-            "(`--resume` kept). `/new` drops resume; admin **Clear** forgets the mapping."
+            "(`--resume` / OpenRouter history kept). `/new` drops resume + chat turns; "
+            "admin **Clear** forgets the mapping."
         )
     else:
         lines.append(
-            "Next message continues the same session (`--resume` kept). "
-            "`/new` drops resume; admin **Clear** forgets the mapping."
+            "Next message continues the same session (`--resume` / OpenRouter history kept). "
+            "`/new` drops resume + chat turns; admin **Clear** forgets the mapping."
         )
     return "\n".join(lines)
 

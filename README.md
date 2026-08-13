@@ -59,6 +59,7 @@ uv run zen-agent-bot
 | **List fleet** | `/agents` |
 | **Cron** | Admin **Schedules** (create/enable/run) · `/schedule` lists · each run posts in the home channel and opens a **public Discord thread** |
 | **Handoff** | `/handoff agent:manager note:…` from a thread (picker) · **Ask Manager** button on non-manager job-done bubbles |
+| **OpenRouter memory** | Last ~20 user/assistant turns in SQLite per thread (replayed each call). `/new` clears it |
 
 Status messages **stream live** during runs (`STREAMING=false` to disable). Long runs and errors append `✅ Done @you · 3m 12s` on the **same** status bubble (not a new message). Send now / `/close` cancellations skip the ping.
 

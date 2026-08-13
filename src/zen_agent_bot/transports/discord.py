@@ -724,7 +724,8 @@ class AgentDiscordBot(discord.Client):
             key = self.gateway.session_key(profile.id, "discord", thread_key(channel))
             self.gateway.reset_session_resume(key)
             await interaction.response.send_message(
-                "New session. Your next message here starts fresh (no `--resume`). "
+                "New session. Your next message here starts fresh "
+                "(no `--resume` / OpenRouter chat history). "
                 "`/model` and `/backend` overrides are kept."
             )
 

@@ -174,6 +174,7 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 - cursor-sdk local (stream + cancel)
 - ~~Cron / scheduled jobs~~ ✅ — admin **Schedules** + `/schedule`; each run = new Discord thread
 - ~~**`/handoff` + Ask Manager**~~ ✅ — pick agent or one-click manager; new public thread + transcript
+- ~~**OpenRouter chat window**~~ ✅ — SQLite last ~20 turns per thread; `/new` clears
 - Optional @mention wake in shared channels (default stays dedicated home channels)
 
 **Out of scope / defer**

@@ -110,6 +110,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | 4.6 | Notifications (Discord/TG ping when job finishes) | ✅ |
 | 4.7 | Session hygiene (`/close`, prune empty mappings) | ✅ |
 | 4.8 | `/handoff` + Ask Manager button | ✅ | Transcript → new public thread; pick agent or one-click manager |
+| 4.9 | OpenRouter chat-turn window | ✅ | SQLite last ~20 turns; replayed each OpenRouter call |
 
 ### Phase 5 — Later / maybe
 

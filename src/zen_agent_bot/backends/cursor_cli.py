@@ -90,7 +90,9 @@ class CursorCliBackend:
         cancel_event: asyncio.Event | None = None,
         register_proc: RegisterProc | None = None,
         model: str | None = None,
+        history: list[dict[str, str]] | None = None,
     ) -> AgentRunResult:
+        _ = history
         binary = self._resolve_bin()
         if on_progress is not None:
             return await self._run_streaming(

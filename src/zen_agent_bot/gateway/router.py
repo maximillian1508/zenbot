@@ -600,6 +600,11 @@ class Gateway:
                 if self.config.streaming_enabled
                 else None
             )
+            history = (
+                self.config.db.list_chat_turns(job.session_key)
+                if backend_name == "openrouter"
+                else None
+            )
             try:
                 result = await self.backend_for(job.agent_id, job.session_key).run(
                     prompt=full_prompt,
@@ -609,6 +614,7 @@ class Gateway:
                     cancel_event=run_handle.cancel_event,
                     register_proc=run_handle.register_proc,
                     model=resolved.model,
+                    history=history,
                 )
             except Exception as exc:
                 log.exception("Agent run failed for %s", job.agent_id)
@@ -731,6 +737,11 @@ class Gateway:
             job.session_key,
             ThreadSession(session_id=result.session_id, title=title),
         )
+        if backend_name == "openrouter" and result.exit_code == 0 and not result.error:
+            self.config.db.append_chat_turn(job.session_key, "user", job.user_prompt)
+            self.config.db.append_chat_turn(
+                job.session_key, "assistant", result.text or ""
+            )
         return JobResult(
             text=body,
             exit_code=result.exit_code,
@@ -843,8 +854,8 @@ class Gateway:
         if after.backend != before.backend:
             self.store.reset_resume(session_key)
             resume_note = (
-                "\nResume cleared — session ids don’t transfer across backends. "
-                "Next message starts a new session."
+                "\nResume / chat history cleared — session ids don’t transfer "
+                "across backends. Next message starts a new session."
             )
         model = resolve_model(self.config.db, session_key, after.backend)
         text = (
