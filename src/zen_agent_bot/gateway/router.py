@@ -815,7 +815,7 @@ class Gateway:
             self.store.set_model(session_key, None)
         resolved = resolve_model(self.config.db, session_key, backend_name)
         text = format_model_status(resolved)
-        if backend_name != "cursor-cli":
+        if backend_name not in ("cursor-cli", "cursor-sdk"):
             return text
         models = await self.cursor_models()
         if action == "set" and value and models and not model_in_catalog(value, models):

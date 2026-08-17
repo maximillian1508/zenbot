@@ -317,6 +317,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             or ""
         ).strip()
         cursor_model = db.get_setting("backend.cursor-cli.model") or ""
+        cursor_sdk_model = db.get_setting("backend.cursor-sdk.model") or ""
         claude_model = db.get_setting("backend.claude-cli.model") or ""
         openrouter_model = db.get_setting("backend.openrouter.model") or ""
         openrouter_online = _truthy_setting(
@@ -380,12 +381,15 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
           <input type="text" name="discord_guild_id" value="{html.escape(guild)}" inputmode="numeric" pattern="[0-9]*" placeholder="optional">
         </label>
         <h3 class="section">Default models</h3>
-        <p class="hint">Blank = CLI default (OpenRouter falls back to <code>anthropic/claude-sonnet-4</code>).
+        <p class="hint">Blank = CLI default (OpenRouter falls back to <code>anthropic/claude-sonnet-4</code>;
+        cursor-sdk falls back to cursor-cli then <code>composer-2.5</code>).
         Thread <code>/model</code> overrides these. Env <code>AGENT_MODEL</code> / <code>CLAUDE_MODEL</code> /
         <code>OPENROUTER_MODEL</code> wins if set. Next job picks this up — no restart.</p>
         {env_model_note}
         <label>cursor-cli model
           <input type="text" name="cursor_model" value="{html.escape(cursor_model)}" placeholder="e.g. composer-2.5"></label>
+        <label>cursor-sdk model
+          <input type="text" name="cursor_sdk_model" value="{html.escape(cursor_sdk_model)}" placeholder="blank → cursor-cli / composer-2.5"></label>
         <label>claude-cli model
           <input type="text" name="claude_model" value="{html.escape(claude_model)}" placeholder="e.g. sonnet"></label>
         <label>openrouter model
@@ -582,6 +586,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         max_concurrent_jobs: str = Form("2"),
         discord_guild_id: str = Form(""),
         cursor_model: str = Form(""),
+        cursor_sdk_model: str = Form(""),
         claude_model: str = Form(""),
         openrouter_model: str = Form(""),
         openrouter_online: str | None = Form(None),
@@ -604,6 +609,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         else:
             db.set_setting("discord_guild_id", "")
         db.set_setting("backend.cursor-cli.model", cursor_model.strip())
+        db.set_setting("backend.cursor-sdk.model", cursor_sdk_model.strip())
         db.set_setting("backend.claude-cli.model", claude_model.strip())
         db.set_setting("backend.openrouter.model", openrouter_model.strip())
         db.set_setting(
@@ -935,7 +941,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             <input type="text" name="display_name" value="{html.escape(str(r.get('display_name') or ''))}" required></label>
           <label>Workspace
             <input type="text" name="workspace" value="{html.escape(str(r.get('workspace') or '/home/maxi'))}"></label>
-          <label>Default backend (<code>cursor-cli</code>, <code>claude-cli</code>, <code>openrouter</code>)
+          <label>Default backend (<code>cursor-cli</code>, <code>cursor-sdk</code>, <code>claude-cli</code>, <code>openrouter</code>)
             <input type="text" name="default_backend" value="{html.escape(str(r.get('default_backend') or 'cursor-cli'))}"></label>
           <label>Skills (one path per line)
             <textarea name="skills">{html.escape(str(skills))}</textarea></label>

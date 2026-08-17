@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from .base import AgentBackend, AgentRunResult
 from .claude_cli import ClaudeCliBackend, ClaudeCliConfig
 from .cursor_cli import CursorCliBackend, CursorCliConfig
+from .cursor_sdk import CursorSdkBackend, CursorSdkConfig
 from .openrouter import OpenRouterBackend, OpenRouterConfig
 
 if TYPE_CHECKING:
@@ -37,6 +38,16 @@ def build_backends(
                     timeout_sec=int(cfg.get("timeout_sec", 3600)),
                 )
             )
+        elif kind == "cursor-sdk":
+            backends[name] = CursorSdkBackend(
+                CursorSdkConfig(
+                    model=cfg.get("model"),
+                    force=bool(cfg.get("force", True)),
+                    timeout_sec=int(cfg.get("timeout_sec", 3600)),
+                    api_key_env=str(cfg.get("api_key_env", "CURSOR_API_KEY")),
+                ),
+                secrets=store,
+            )
         elif kind == "openrouter":
             backends[name] = OpenRouterBackend(
                 OpenRouterConfig(
@@ -53,6 +64,8 @@ def build_backends(
             raise ValueError(f"Unknown backend kind {kind!r} for {name!r}")
     if "cursor-cli" not in backends:
         backends["cursor-cli"] = CursorCliBackend(CursorCliConfig())
+    if "cursor-sdk" not in backends:
+        backends["cursor-sdk"] = CursorSdkBackend(CursorSdkConfig(), secrets=store)
     if "claude-cli" not in backends:
         backends["claude-cli"] = ClaudeCliBackend(ClaudeCliConfig())
     return backends
@@ -65,6 +78,8 @@ __all__ = [
     "ClaudeCliConfig",
     "CursorCliBackend",
     "CursorCliConfig",
+    "CursorSdkBackend",
+    "CursorSdkConfig",
     "OpenRouterBackend",
     "OpenRouterConfig",
     "build_backends",

@@ -87,6 +87,7 @@ Patterns copied from elsewhere:
 | `bindings` channel → agent | OpenClaw | `routing:` in `config.yaml` |
 | Transport adapter + session store | Hermes | `transports/` + `sessions` |
 | CLI backend spawn | OpenClaw `claude-cli` / cursor plugins | `backends/cursor_cli.py` |
+| Cursor SDK local | Official `cursor-sdk` | `backends/cursor_sdk.py` (`launch_bridge`, stream, cancel, resume) |
 | Agent profile (workspace, model) | OpenClaw `agents.list` | `agents:` in YAML |
 
 ---

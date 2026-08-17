@@ -68,7 +68,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | # | Feature | Billing | Effort | Notes |
 |---|---------|---------|--------|-------|
 | 2.1 | **cursor-cli** (done) | Subscription | ✅ | `agent -p --force --resume` |
-| 2.2 | **cursor-sdk local** | Subscription | 🟡 1–2d | `AsyncClient.launch_bridge` + stream; needs `CURSOR_API_KEY` |
+| 2.2 | **cursor-sdk local** | Subscription | ✅ | `AsyncClient.launch_bridge` + stream + cancel + resume; `/backend cursor-sdk` |
 | 2.3 | **claude-cli** | Claude Max/Pro | 🟢 1d | `claude -p --dangerously-skip-permissions` or sandbox profile |
 | 2.4 | **openrouter** | API $ | ✅ | Chat completions; optional `:online` web search toggle |
 | 2.5 | **openrouter + tools** (optional later) | API $ | 🟠 1w | Reimplement tool loop or delegate hard tasks to cursor-cli |
@@ -77,7 +77,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 
 | Task type | Default backend |
 |-----------|-----------------|
-| Music import, server ops, verify/fix | `cursor-cli` |
+| Music import, server ops, verify/fix | `cursor-cli` (or `/backend cursor-sdk`) |
 | Quick questions, drafting, research | `openrouter` |
 | Anthropic-only coding preference | `claude-cli` |
 
@@ -189,7 +189,8 @@ routing:
 11. ~~**Job-done ping + `/close`**~~ ✅
 12. ~~**One-bot Discord + slash dispatch**~~ ✅
 13. ~~cron / scheduled jobs~~ ✅ — admin Schedules + `/schedule`; new Discord thread per run
-14. cursor-sdk / extra bindings
+14. ~~cursor-sdk local~~ ✅ — `/backend cursor-sdk` (`sdk`); Accept/Deny still P3+
+15. extra bindings / OpenRouter tools
 
 ---
 
@@ -210,7 +211,7 @@ Locked from planning with Maxi — keep these when picking backlog work.
 
 **Done extras:** OpenRouter chat backend; Claude Code backend; file attachments (Discord/TG → `data/attachments/`, paths in prompt; 25 MiB / 10 files).
 
-**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · ~~queue Send now button~~ ✅ · ~~per-thread `/backend`~~ ✅ · ~~job-done ping~~ ✅ · ~~`/close` / session hygiene~~ ✅ · ~~one-bot Discord + `/music` `/general`~~ ✅ · ~~cron / Schedules~~ ✅ · ~~`/handoff` + Ask Manager~~ ✅ · bindings/routing · cursor-sdk · OpenRouter.
+**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · ~~queue Send now button~~ ✅ · ~~per-thread `/backend`~~ ✅ · ~~job-done ping~~ ✅ · ~~`/close` / session hygiene~~ ✅ · ~~one-bot Discord + `/music` `/general`~~ ✅ · ~~cron / Schedules~~ ✅ · ~~`/handoff` + Ask Manager~~ ✅ · ~~cursor-sdk local~~ ✅ · bindings/routing · OpenRouter tools.
 
 ### Model selection (2026-08-13)
 
@@ -218,7 +219,7 @@ Locked from planning with Maxi — keep these when picking backlog work.
 
 **Admin**
 
-- Settings (or agent form): default model per backend — `backend.cursor-cli.model`, `backend.claude-cli.model`, `backend.openrouter.model`.
+- Settings (or agent form): default model per backend — `backend.cursor-cli.model`, `backend.cursor-sdk.model`, `backend.claude-cli.model`, `backend.openrouter.model`. cursor-sdk falls back to cursor-cli then `composer-2.5`.
 - OpenRouter web search: `backend.openrouter.online` (admin checkbox) or env `OPENROUTER_ONLINE` — appends `:online` at resolve time (idempotent).
 - Blank = omit `--model` / use that CLI’s default (OpenRouter keeps its current default string).
 - Env still wins if set: `AGENT_MODEL`, `CLAUDE_MODEL`, `OPENROUTER_MODEL`.
@@ -244,7 +245,7 @@ Locked from planning with Maxi — keep these when picking backlog work.
 **Shipped.** Same session row as `/model`.
 
 - `/backend` — show effective backend (thread → agent profile default) + model.
-- `/backend cursor-cli` / `claude-cli` / `openrouter` (aliases: `cursor`, `claude`, `or`).
+- `/backend cursor-cli` / `cursor-sdk` / `claude-cli` / `openrouter` (aliases: `cursor`, `sdk`, `claude`, `or`).
 - `/backend clear` — drop override; next job uses the agent profile default.
 - Changing the **effective** backend clears `--resume` (session ids don’t transfer). `/model` override is kept.
 - In-flight job unchanged; next queued/new job picks it up.

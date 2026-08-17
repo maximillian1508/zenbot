@@ -51,7 +51,7 @@ uv run zen-agent-bot
 | **Fresh session** | `/new` in the thread (keeps `/model` and `/backend` overrides) |
 | **Close session** | `/close` — archive Discord thread, keep `--resume`; admin **Sessions → Clear** forgets the mapping |
 | **Model** | `/model` lists Cursor CLI models · `/model composer-2.5` this thread · `/model clear` |
-| **Backend** | `/backend` · `/backend openrouter` this thread · `/backend clear` (clears resume when switching) |
+| **Backend** | `/backend` · `/backend cursor-sdk` / `openrouter` this thread · `/backend clear` (clears resume when switching) |
 | **Cancel in-flight job** | `/cancel` in the thread |
 | **Restart gateway** | `/rebuild` on **manager** (host `systemctl restart`) |
 | **Check session** | `/status` (Discord) or admin **Status** page |
@@ -66,6 +66,10 @@ Status messages **stream live** during runs (`STREAMING=false` to disable). Long
 ## OpenRouter (optional)
 
 Chat-only backend (no shell). Set `OPENROUTER_API_KEY` in admin **Secrets** (live) or `.env`, optionally `OPENROUTER_MODEL` / Settings model. Settings checkbox **OpenRouter web search** (or `OPENROUTER_ONLINE=true`) appends `:online` to the resolved model — live on the next job, extra $. Set an agent's **default backend** to `openrouter` in the admin UI (**restart**) or use `/backend openrouter` in a thread (live). Good for cheap Q&A; keep `cursor-cli` for server/code work.
+
+## Cursor SDK local (optional)
+
+Same Cursor subscription as `cursor-cli`, via `cursor-sdk` (`AsyncClient.launch_bridge`). Stream + `/cancel` + resume by SDK agent id. Set an agent's **default backend** to `cursor-sdk` (restart) or `/backend cursor-sdk` (aliases: `sdk`). Model required — admin **cursor-sdk model**, else cursor-cli / `AGENT_MODEL`, else `composer-2.5`. Needs `CURSOR_API_KEY` (admin Secrets). Session ids do **not** transfer from `cursor-cli`. Accept/Deny is still later.
 
 ## Claude Code (optional)
 

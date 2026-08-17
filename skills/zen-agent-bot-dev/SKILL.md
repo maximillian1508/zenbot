@@ -81,6 +81,7 @@ The process runs as **maxi** with normal host access (`~/.ssh`, `agent`, `/srv`,
 | SQLite store | `src/zen_agent_bot/store.py` |
 | Gateway + queue | `src/zen_agent_bot/gateway/router.py` |
 | Cursor CLI backend | `src/zen_agent_bot/backends/cursor_cli.py` |
+| Cursor SDK backend | `src/zen_agent_bot/backends/cursor_sdk.py` |
 | Discord / Telegram | `src/zen_agent_bot/transports/` |
 | Admin UI | `src/zen_agent_bot/web/app.py` (`/status` live jobs) |
 | Cursor / Claude / OpenRouter | `src/zen_agent_bot/backends/` |
@@ -165,13 +166,13 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 5. ~~**Claude Code backend**~~ ✅ — `claude -p`; set agent `default_backend` to `claude-cli` (needs host `claude` login)
 6. ~~**File attachments**~~ ✅ — Discord/Telegram files → `data/attachments/`; paths injected into prompt (images via Read; other files by path; 25 MiB / 10 files)
 
-**Done (out of prior P2):** OpenRouter chat backend; **model selection**; **queue Send now**; **per-thread `/backend`**; **job-done ping**; **`/close`** + admin prune empty.
+**Done (out of prior P2):** OpenRouter chat backend; **model selection**; **queue Send now**; **per-thread `/backend`**; **job-done ping**; **`/close`** + admin prune empty; **cursor-sdk local**.
 
 **P2 / Phase 2–3 (wanted)**
 
 - ~~Master slash dispatch~~ ✅ — one Discord bot; `/music` `/general` `/manager` `/run`
 - OpenClaw-style extra bindings (non-home channels)
-- cursor-sdk local (stream + cancel)
+- ~~cursor-sdk local~~ ✅ — `/backend cursor-sdk` (`sdk`); stream + cancel + resume; Accept/Deny still P3+
 - ~~Cron / scheduled jobs~~ ✅ — admin **Schedules** + `/schedule`; each run = new Discord thread
 - ~~**`/handoff` + Ask Manager**~~ ✅ — pick agent or one-click manager; new public thread + transcript
 - ~~**OpenRouter chat window**~~ ✅ — SQLite last ~20 turns per thread; `/new` clears

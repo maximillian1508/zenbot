@@ -9,15 +9,18 @@ from .store import ConfigStore
 
 BACKEND_MODEL_ENV = {
     "cursor-cli": "AGENT_MODEL",
+    "cursor-sdk": "AGENT_MODEL",
     "claude-cli": "CLAUDE_MODEL",
     "openrouter": "OPENROUTER_MODEL",
 }
 BACKEND_MODEL_SETTING = {
     "cursor-cli": "backend.cursor-cli.model",
+    "cursor-sdk": "backend.cursor-sdk.model",
     "claude-cli": "backend.claude-cli.model",
     "openrouter": "backend.openrouter.model",
 }
 OPENROUTER_FALLBACK = "anthropic/claude-sonnet-4"
+CURSOR_SDK_FALLBACK = "composer-2.5"
 OPENROUTER_ONLINE_SETTING = "backend.openrouter.online"
 OPENROUTER_ONLINE_ENV = "OPENROUTER_ONLINE"
 ONLINE_SUFFIX = ":online"
@@ -87,6 +90,11 @@ def admin_default_model(db: ConfigStore, backend: str) -> tuple[str | None, str]
         setting_val = blank_to_none(db.get_setting(setting_key))
         if setting_val:
             return setting_val, "admin"
+    if backend == "cursor-sdk":
+        cli = blank_to_none(db.get_setting("backend.cursor-cli.model"))
+        if cli:
+            return cli, "admin"
+        return CURSOR_SDK_FALLBACK, "default"
     if backend == "openrouter":
         return OPENROUTER_FALLBACK, "default"
     return None, "default"

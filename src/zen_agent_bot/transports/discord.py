@@ -857,7 +857,7 @@ class AgentDiscordBot(discord.Client):
             description="Show or set the agent backend for this thread",
         )
         @app_commands.describe(
-            name="cursor-cli, claude-cli, openrouter, or clear/default"
+            name="cursor-cli, cursor-sdk, claude-cli, openrouter, or clear/default"
         )
         async def cmd_backend(
             interaction: discord.Interaction, name: str | None = None

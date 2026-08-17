@@ -135,6 +135,12 @@ def load_config() -> GatewayConfig:
                 "model": or_model,
                 "base_url": or_base,
             },
+            "cursor-sdk": {
+                "kind": "cursor-sdk",
+                "force": force,
+                "model": db.get_setting("backend.cursor-sdk.model") or model,
+                "api_key_env": "CURSOR_API_KEY",
+            },
         },
         store=db,
     )

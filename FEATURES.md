@@ -55,7 +55,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | OpenRouter chat | ✅ | — | **done** | Chat-only; optional `:online` search toggle |
 | Admin live status | ✅ | — | **done** | `/status` + `/api/status` |
 | Codex / other CLIs | ❌ | 🟢 each | P2 | ~50 lines per adapter |
-| cursor-sdk local | ❌ | 🟡 | P2 ★ | Stream + cancel; same subscription |
+| cursor-sdk local | ✅ | — | **done** | `AsyncClient.launch_bridge`; stream + `/cancel` + resume; `/backend cursor-sdk` |
 | Cron schedules | ✅ | — | **done** | Admin Schedules + `/schedule`; new Discord thread per run |
 | Thread handoff | ✅ | — | **done** | `/handoff` agent picker + **Ask Manager** button; new public thread + transcript |
 | OpenRouter chat window | ✅ | — | **done** | SQLite last ~20 turns per thread; `/new` / backend switch / admin Clear wipe |
@@ -103,6 +103,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 13. ~~**Cron / scheduled jobs**~~ ✅  
 14. ~~**`/handoff` + Ask Manager**~~ ✅  
 15. ~~**OpenRouter chat-turn window**~~ ✅  
-16. Phase 2/3: extra bindings · cursor-sdk  
+16. ~~**cursor-sdk local**~~ ✅ — `/backend cursor-sdk` (or `sdk`); stream + cancel + resume  
+17. Phase 2/3: extra bindings · OpenRouter tools 
 
 See [ROADMAP.md](./ROADMAP.md) — **Decisions (2026-08-12)** + billing/phase detail.
