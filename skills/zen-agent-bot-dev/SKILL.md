@@ -70,6 +70,8 @@ curl -sS http://127.0.0.1:8787/health
 
 **Important:** On restart the gateway waits for in-flight jobs (`SHUTDOWN_GRACE_SEC`). Host unit sets **600s / 10 min** with `TimeoutStopSec=620` — re-run `sudo …/scripts/install-host-service.sh` (or copy the unit + `daemon-reload`) after pulling unit changes. If a job still runs after grace, it is cancelled but **partial text is kept** on the status message. Use `/cancel` to stop early. Self-`/rebuild` while *this* manager job is still running is the footgun: the restart waits, then cancels *you* if you overrun grace.
 
+Unit `MemoryMax` must stay high enough for Cursor agent + node (default **6G**, `MemoryHigh=3G`). A **2G** cap OOM-kills the whole gateway mid-job → Discord stuck on “Agent running…” with no final reply. After unit changes: `sudo install -m 0644 deploy/systemd/zen-agent-bot.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart zen-agent-bot` (or re-run `install-host-service.sh`).
+
 The process runs as **maxi** with normal host access (`~/.ssh`, `agent`, `/srv`, docker CLI if in `docker` group). Admin listens on `0.0.0.0:8787` (required so Traefik-in-Docker can reach the host); Traefik file route exposes `agents.maximillianleonard.dev` on Tailscale. If Discord resumes fail with `attempt to write a readonly database`, chown root-owned files under `~/.cursor` left by the old Docker container.
 
 ## Code map

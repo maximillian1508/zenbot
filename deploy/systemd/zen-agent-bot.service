@@ -23,8 +23,11 @@ RestartSec=5
 # Must be > SHUTDOWN_GRACE_SEC so gateway can wait for in-flight jobs.
 TimeoutStopSec=620
 KillMode=mixed
-# Soft memory guard (matches former compose limit intent)
-MemoryMax=2G
+# Cursor agent + node tooling routinely exceeds 2G; a hard 2G cap OOM-kills
+# the whole gateway mid-job (Discord stuck on "Agent running…"). Host has 14G.
+MemoryHigh=3G
+MemoryMax=6G
+OOMPolicy=continue
 
 # Agent needs to reach Discord, OpenRouter, Cursor, local APIs
 # No NewNetwork — keep host networking for simplicity
