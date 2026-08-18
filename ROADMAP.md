@@ -104,6 +104,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | 4.2 | Job queue (max N concurrent agents) | 🟡 1d (partial ✅) |
 | 4.2b | Queue **Send now** button (Stop & send) | ✅ | Discord + Drop; Telegram later |
 | 4.3 | `/cancel` in chat | ✅ |
+| 4.3c | **Cancel** button on running Discord status | ✅ |
 | 4.3b | Graceful shutdown (`stop_grace_period` + SIGTERM) | ✅ |
 | 4.4 | Skills prefix (load `~/.cursor/skills/*/SKILL.md` by name) | 🟡 1d |
 | 4.5 | Cron (`/schedule` + admin Schedules) | ✅ | New Discord thread per run |
@@ -185,6 +186,7 @@ routing:
 7. ~~**File attachments**~~ ✅ — Discord/Telegram → `data/attachments/` + paths in prompt
 8. ~~**Model selection**~~ ✅ — admin fields + per-thread `/model` (session override; share plumbing with `/backend`)
 9. ~~**Queue “Send now” button**~~ ✅ — Discord Stop & send (cancel in-flight, run this follow-up)
+9b. ~~**Cancel button on running job**~~ ✅ — Discord **Cancel** on the status bubble (`/cancel` still works)
 10. ~~**Per-thread `/backend`**~~ ✅
 11. ~~**Job-done ping + `/close`**~~ ✅
 12. ~~**One-bot Discord + slash dispatch**~~ ✅

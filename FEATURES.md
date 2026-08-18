@@ -51,6 +51,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | Per-thread `/backend` | ✅ | — | **done** | Same session row as `/model`; resume cleared on switch |
 | **Model selection** | ✅ | — | **done** | Admin fields + `/model` in thread; live apply |
 | Job queue + `/cancel` | ✅ | — | **done** | Graceful shutdown + `/rebuild` too |
+| **Cancel button** | ✅ | — | **done** | Discord **Cancel** on running status bubble |
 | **Queue Send now button** | ✅ | — | **done** | Discord Stop & send + Drop; see ROADMAP |
 | OpenRouter chat | ✅ | — | **done** | Chat-only; optional `:online` search toggle |
 | Admin live status | ✅ | — | **done** | `/status` + `/api/status` |
@@ -97,13 +98,14 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 7. Telegram enable → ~~Claude backend~~ → ~~file attachments~~ ✅  
 8. ~~**Model selection**~~ ✅ — admin default models + `/model` in thread  
 9. ~~**Queue Send now**~~ ✅ — Discord Stop & send + Drop on queued follow-ups  
-10. ~~**Per-thread `/backend`**~~ ✅  
-11. ~~**Job-done ping + `/close`**~~ ✅  
-12. ~~**One-bot Discord + `/music` `/general` `/run`**~~ ✅  
-13. ~~**Cron / scheduled jobs**~~ ✅  
-14. ~~**`/handoff` + Ask Manager**~~ ✅  
-15. ~~**OpenRouter chat-turn window**~~ ✅  
-16. ~~**cursor-sdk local**~~ ✅ — `/backend cursor-sdk` (or `sdk`); stream + cancel + resume  
-17. Phase 2/3: extra bindings · OpenRouter tools 
+10. ~~**Cancel button**~~ ✅ — Discord **Cancel** on the running status bubble (`/cancel` still works)  
+11. ~~**Per-thread `/backend`**~~ ✅  
+12. ~~**Job-done ping + `/close`**~~ ✅  
+13. ~~**One-bot Discord + `/music` `/general` `/run`**~~ ✅  
+14. ~~**Cron / scheduled jobs**~~ ✅  
+15. ~~**`/handoff` + Ask Manager**~~ ✅  
+16. ~~**OpenRouter chat-turn window**~~ ✅  
+17. ~~**cursor-sdk local**~~ ✅ — `/backend cursor-sdk` (or `sdk`); stream + cancel + resume  
+18. Phase 2/3: extra bindings · OpenRouter tools 
 
 See [ROADMAP.md](./ROADMAP.md) — **Decisions (2026-08-12)** + billing/phase detail.

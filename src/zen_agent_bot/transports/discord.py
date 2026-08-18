@@ -158,6 +158,45 @@ class QueueJobView(discord.ui.View):
         self.stop()
 
 
+class CancelJobView(discord.ui.View):
+    """Stop the in-flight job from the running status bubble."""
+
+    def __init__(self, gateway: Gateway, session_key: str) -> None:
+        super().__init__(timeout=None)
+        self.gateway = gateway
+        self.session_key = session_key
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user and self.gateway.is_allowed(interaction.user.id):
+            return True
+        if interaction.response.is_done():
+            await interaction.followup.send("Not authorized.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Not authorized.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger)
+    async def cancel(
+        self, interaction: discord.Interaction, button: discord.ui.Button[Any]
+    ) -> None:
+        await interaction.response.defer()
+        if await self.gateway.cancel_session(
+            self.session_key, reason="stopped by Cancel"
+        ):
+            await interaction.followup.send(
+                "Cancelling the running job…", ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
+                "Nothing running in this thread.", ephemeral=True
+            )
+            try:
+                await interaction.message.edit(view=None)
+            except discord.HTTPException:
+                pass
+        self.stop()
+
+
 async def send_chunks(target: Messageable, text: str) -> None:
     if len(text) <= DISCORD_CHUNK:
         await target.send(text)
@@ -565,6 +604,7 @@ class AgentDiscordBot(discord.Client):
                 schedule_id=schedule_id,
                 on_done=on_done,
                 done_view=done_view,
+                running_view=CancelJobView(self.gateway, sess_key),
             ),
             name=f"agent-{sess_key}",
         )

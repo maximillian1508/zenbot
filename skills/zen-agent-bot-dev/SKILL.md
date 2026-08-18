@@ -208,6 +208,7 @@ Logs: `journalctl -u zen-agent-bot -f`, `data/logs/rebuild.log`, `journalctl -u 
 - `systemctl is-active zen-agent-bot` + Discord bots connect
 - Post in `#agent` → thread + streaming status + final reply
 - Follow-up while busy → queued message + **Send now** / **Drop**; then runs
+- Running status bubble shows **Cancel** (same as `/cancel`; keep partial text)
 - Job finishes → same status bubble appends `✅ Done @you · 3m`; `/close` archives Discord thread and keeps `--resume`
 - Admin **Schedules** + `/schedule`; a due/run-now job opens a new thread in the agent home channel
 - `/handoff agent:manager` from a thread, or tap **Ask Manager** on a General/music job-done bubble

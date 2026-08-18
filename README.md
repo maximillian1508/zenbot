@@ -52,7 +52,7 @@ uv run zen-agent-bot
 | **Close session** | `/close` — archive Discord thread, keep `--resume`; admin **Sessions → Clear** forgets the mapping |
 | **Model** | `/model` lists Cursor CLI models · `/model composer-2.5` this thread · `/model clear` |
 | **Backend** | `/backend` · `/backend cursor-sdk` / `openrouter` this thread · `/backend clear` (clears resume when switching) |
-| **Cancel in-flight job** | `/cancel` in the thread |
+| **Cancel in-flight job** | **Cancel** on the running status bubble · `/cancel` in the thread |
 | **Restart gateway** | `/rebuild` on **manager** (host `systemctl restart`) |
 | **Check session** | `/status` (Discord) or admin **Status** page |
 | **Live jobs / errors** | Admin UI → **Status** (auto-refresh) |

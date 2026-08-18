@@ -75,6 +75,7 @@ class _QueuedJob:
     schedule_id: str | None = None
     on_done: Callable[["JobResult"], Awaitable[None]] | None = None
     done_view: object | None = None
+    running_view: object | None = None
 
 
 @dataclass
@@ -293,6 +294,7 @@ class Gateway:
         schedule_id: str | None = None,
         on_done: Callable[[JobResult], Awaitable[None]] | None = None,
         done_view: object | None = None,
+        running_view: object | None = None,
     ) -> JobResult:
         if self._shutting_down:
             await edit_status("⚠️ Gateway is shutting down — try again after restart.")
@@ -310,6 +312,7 @@ class Gateway:
             schedule_id=schedule_id,
             on_done=on_done,
             done_view=done_view,
+            running_view=running_view,
         )
         async with state.lock:
             ahead = queued_count(state.pending, stop=_STOP) + (1 if state.busy else 0)
@@ -571,7 +574,9 @@ class Gateway:
 
     async def _execute_job(self, job: _QueuedJob) -> JobResult:
         state = self._sessions[job.session_key]
-        await job.edit_status("⏳ Agent running…", view=None)
+        run_handle = _RunHandle()
+        state.run_handle = run_handle
+        await job.edit_status("⏳ Agent running…", view=job.running_view)
         cursor_key = self.config.db.resolve_secret("CURSOR_API_KEY")
         if cursor_key:
             os.environ["CURSOR_API_KEY"] = cursor_key
@@ -590,9 +595,6 @@ class Gateway:
             user_message=job.user_prompt,
             model=resolved.model,
         )
-
-        run_handle = _RunHandle()
-        state.run_handle = run_handle
 
         async with self._global_sem:
             progress = (

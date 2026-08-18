@@ -77,6 +77,21 @@ class SendNowRaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(edited)
         self.assertIn("starting", edited[0].lower())
 
+    async def test_cancel_session_sets_event(self) -> None:
+        gw = _gateway()
+        gw._sessions = {}
+        state = _SessionState()
+        handle = _RunHandle()
+        state.busy = True
+        state.run_handle = handle
+        gw._sessions["k"] = state
+
+        ok = await gw.cancel_session("k", reason="stopped by Cancel")
+        self.assertTrue(ok)
+        self.assertTrue(handle.cancel_event.is_set())
+        self.assertEqual(handle.cancel_reason, "stopped by Cancel")
+        self.assertFalse(await gw.cancel_session("idle"))
+
     async def test_missing_job(self) -> None:
         gw = _gateway()
         gw._sessions = {"k": _SessionState()}
