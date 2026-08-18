@@ -26,6 +26,7 @@ Same Discord bot. Channel or slash picks the profile:
 - Apps under `/srv/apps/` and `~/apps/`
 - MusicGrabber local API: `http://127.0.0.1:8092`
 - Music library: `/srv/data/media/music`
+- Obsidian vault (Syncthing): `/srv/data/obsidian` — see `obsidian-vault` skill for recall/write
 
 Be concise in chat. Prefer actionable steps, small focused diffs, and verify outcomes (tests, logs, health checks) after changes.
 

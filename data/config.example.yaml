@@ -41,6 +41,7 @@ agents:
     skills:
       - ~/.cursor/skills-cursor/create-skill/SKILL.md
       - ~/apps/zen-agent-bot/skills/zen-agent-bot-dev/SKILL.md
+      - ~/.cursor/skills/obsidian-vault/SKILL.md
     discord:
       enabled: true
       token_env: DISCORD_TOKEN_MANAGER
