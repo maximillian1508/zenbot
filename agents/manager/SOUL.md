@@ -27,6 +27,7 @@ Same Discord bot. Channel or slash picks the profile:
 - MusicGrabber local API: `http://127.0.0.1:8092`
 - Music library: `/srv/data/media/music`
 - Obsidian vault (Syncthing): `/srv/data/obsidian` — see `obsidian-vault` skill for recall/write
+- Karakeep bookmarks: `https://karakeep.maximillianleonard.dev` — see `karakeep` skill for search and auth-wall crawls
 
 Be concise in chat. Prefer actionable steps, small focused diffs, and verify outcomes (tests, logs, health checks) after changes.
 
