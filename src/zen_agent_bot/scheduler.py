@@ -1,4 +1,4 @@
-"""Poll SQLite schedules and fire each due run as a new Discord thread."""
+"""Poll SQLite schedules and fire each due run into a dedicated Discord thread."""
 
 from __future__ import annotations
 
@@ -72,6 +72,7 @@ class CronScheduler:
                 name=str(row["name"]),
                 prompt=str(row["prompt"]),
                 cron_expr=str(row["cron_expr"]),
+                last_thread_id=row.get("last_thread_id"),
             )
         except Exception as exc:
             log.exception("Failed to launch schedule %s", schedule_id)
@@ -94,8 +95,9 @@ class CronScheduler:
         self.gateway.config.db.mark_schedule_done(schedule_id, ok=ok, error=err)
 
 
-def cron_prompt(*, name: str, cron_expr: str, prompt: str) -> str:
+def cron_prompt(*, name: str, cron_expr: str, prompt: str, reused: bool = False) -> str:
+    where = "same thread, resume previous run" if reused else "first run in this thread"
     return (
-        f"[Scheduled task `{name}` · `{cron_expr}` — new thread this run]\n\n"
+        f"[Scheduled task `{name}` · `{cron_expr}` — {where}]\n\n"
         f"{prompt.strip()}"
     )

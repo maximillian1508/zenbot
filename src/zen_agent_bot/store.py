@@ -657,6 +657,23 @@ class ConfigStore:
             self._conn.commit()
             return int(cur.rowcount)
 
+    def clear_schedule_thread(self, schedule_id: str) -> None:
+        """Forget the dedicated Discord thread so the next run opens a new one."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE schedules SET
+                    last_thread_id = NULL,
+                    last_session_key = NULL,
+                    last_thread_url = NULL,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (now, schedule_id),
+            )
+            self._conn.commit()
+
     def set_schedule_next_run(self, schedule_id: str, next_run_at: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:

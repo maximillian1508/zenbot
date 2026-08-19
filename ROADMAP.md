@@ -107,7 +107,7 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | 4.3c | **Cancel** button on running Discord status | ✅ |
 | 4.3b | Graceful shutdown (`stop_grace_period` + SIGTERM) | ✅ |
 | 4.4 | Skills prefix (load `~/.cursor/skills/*/SKILL.md` by name) | 🟡 1d |
-| 4.5 | Cron (`/schedule` + admin Schedules) | ✅ | New Discord thread per run |
+| 4.5 | Cron (`/schedule` + admin Schedules) | ✅ | One Discord thread per schedule; resume |
 | 4.6 | Notifications (Discord/TG ping when job finishes) | ✅ |
 | 4.7 | Session hygiene (`/close`, prune empty mappings) | ✅ |
 | 4.8 | `/handoff` + Ask Manager button | ✅ | Transcript → new public thread; pick agent or one-click manager |
@@ -190,7 +190,7 @@ routing:
 10. ~~**Per-thread `/backend`**~~ ✅
 11. ~~**Job-done ping + `/close`**~~ ✅
 12. ~~**One-bot Discord + slash dispatch**~~ ✅
-13. ~~cron / scheduled jobs~~ ✅ — admin Schedules + `/schedule`; new Discord thread per run
+13. ~~cron / scheduled jobs~~ ✅ — admin Schedules + `/schedule`; one Discord thread per schedule
 14. ~~cursor-sdk local~~ ✅ — `/backend cursor-sdk` (`sdk`); Accept/Deny still P3+
 15. extra bindings / OpenRouter tools
 

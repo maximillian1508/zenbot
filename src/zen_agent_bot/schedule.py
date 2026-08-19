@@ -80,5 +80,8 @@ def format_schedules_markdown(rows: list[dict[str, Any]]) -> str:
             f"{row.get('timezone') or DEFAULT_TZ} · {row['agent_id']} · "
             f"{flag} · {status} · next {nxt}"
         )
-    lines.append("_Admin → Schedules to add/edit. Each run opens a new Discord thread._")
+    lines.append(
+        "_Admin → Schedules to add/edit. Each schedule reuses one Discord thread "
+        "(new thread only if the last one is gone). `/new` in that thread resets resume._"
+    )
     return "\n".join(lines)

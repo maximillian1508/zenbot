@@ -44,6 +44,16 @@ def allowlist_mentions(user_ids: list[int]) -> str | None:
     return " ".join(f"<@{i}>" for i in ids)
 
 
+async def add_thread_users(
+    thread: discord.Thread, user_ids: list[int] | None = None
+) -> None:
+    for uid in user_ids or []:
+        try:
+            await thread.add_user(discord.Object(id=int(uid)))
+        except discord.HTTPException as exc:
+            log.warning("Could not add user %s to thread %s: %s", uid, thread.id, exc)
+
+
 async def start_public_thread(
     home: discord.TextChannel,
     *,
@@ -54,11 +64,7 @@ async def start_public_thread(
     """Public thread from a home-channel message so it shows in the channel list."""
     msg = await home.send(starter[:2000])
     thread = await msg.create_thread(name=name[:100], auto_archive_duration=10080)
-    for uid in add_user_ids or []:
-        try:
-            await thread.add_user(discord.Object(id=int(uid)))
-        except discord.HTTPException as exc:
-            log.warning("Could not add user %s to thread %s: %s", uid, thread.id, exc)
+    await add_thread_users(thread, add_user_ids)
     return thread
 
 
@@ -660,6 +666,7 @@ class AgentDiscordBot(discord.Client):
         name: str,
         prompt: str,
         cron_expr: str,
+        last_thread_id: str | None = None,
     ) -> dict[str, str | None]:
         if not self.is_ready():
             raise RuntimeError("Discord client not ready")
@@ -669,23 +676,34 @@ class AgentDiscordBot(discord.Client):
         home = await self._home_channel(profile)
         if home is None:
             raise RuntimeError(f"Home channel missing for {agent_id}")
-        title = title_from_prompt(f"cron · {name}")
         ids = self.gateway.config.db.allowlist()
         mention = allowlist_mentions(ids)
-        starter = f"⏰ **Scheduled** `{name}` · `{cron_expr}`"
-        if mention:
-            starter = f"{starter} {mention}"
-        thread = await start_public_thread(
-            home, name=title, starter=starter, add_user_ids=ids
-        )
+        title = f"cron · {name}"[:100]
+        thread = await self._reuse_cron_thread(home, last_thread_id)
+        reused = thread is not None
+        if thread is None:
+            starter = f"⏰ **Scheduled** `{name}` · `{cron_expr}`"
+            if mention:
+                starter = f"{starter} {mention}"
+            thread = await start_public_thread(
+                home, name=title, starter=starter, add_user_ids=ids
+            )
+        else:
+            if thread.name != title:
+                try:
+                    await thread.edit(name=title, reason="cron schedule name")
+                except discord.HTTPException:
+                    pass
+            await add_thread_users(thread, ids)
         body = prompt.strip()
         extra = "…" if len(body) > 500 else ""
-        await thread.send(
-            f"⏰ **Scheduled** `{name}` · `{schedule_id}` · `{cron_expr}`\n\n"
-            f"{body[:500]}{extra}"
-        )
+        header = f"⏰ **Scheduled** `{name}` · `{schedule_id}` · `{cron_expr}`"
+        if mention:
+            header = f"{header} {mention}"
+        await thread.send(f"{header}\n\n{body[:500]}{extra}")
         sess_key = self.gateway.session_key(profile.id, "discord", thread_key(thread))
-        self.gateway.store.set(sess_key, ThreadSession(session_id=None, title=title))
+        if not reused:
+            self.gateway.store.set(sess_key, ThreadSession(session_id=None, title=title))
         status_msg = await thread.send("⏳ Agent running…")
 
         async def _on_done(result: JobResult, sid: str = schedule_id) -> None:
@@ -696,7 +714,9 @@ class AgentDiscordBot(discord.Client):
         self._launch_job(
             profile=profile,
             sess_key=sess_key,
-            prompt=cron_prompt(name=name, cron_expr=cron_expr, prompt=prompt),
+            prompt=cron_prompt(
+                name=name, cron_expr=cron_expr, prompt=prompt, reused=reused
+            ),
             status_msg=status_msg,
             mention=mention,
             schedule_id=schedule_id,
@@ -708,6 +728,37 @@ class AgentDiscordBot(discord.Client):
             "session_key": sess_key,
             "thread_url": str(url) if url else None,
         }
+
+    async def _reuse_cron_thread(
+        self,
+        home: discord.TextChannel,
+        last_thread_id: str | None,
+    ) -> discord.Thread | None:
+        """Return the schedule's existing thread if it still lives in this home channel."""
+        if not last_thread_id:
+            return None
+        try:
+            tid = int(last_thread_id)
+        except (TypeError, ValueError):
+            return None
+        ch = self.get_channel(tid)
+        if ch is None:
+            try:
+                ch = await self.fetch_channel(tid)
+            except discord.HTTPException:
+                log.info("Cron thread %s missing; will create a new one", last_thread_id)
+                return None
+        if not isinstance(ch, discord.Thread) or ch.parent_id != home.id:
+            return None
+        if ch.archived:
+            try:
+                await ch.edit(archived=False, locked=False, reason="cron")
+            except discord.HTTPException:
+                log.warning(
+                    "Could not unarchive cron thread %s; creating a new one", tid
+                )
+                return None
+        return ch
 
     async def _slash_start(
         self,

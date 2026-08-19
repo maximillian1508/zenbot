@@ -14,6 +14,7 @@ from zen_agent_bot.schedule import (
     validate_cron,
     validate_timezone,
 )
+from zen_agent_bot.scheduler import CronScheduler, cron_prompt
 from zen_agent_bot.store import ConfigStore
 
 
@@ -123,6 +124,107 @@ class StoreScheduleTests(unittest.TestCase):
         )
         self.assertIn("`health`", text)
         self.assertIn("0 9 * * *", text)
+        self.assertIn("reuses one Discord thread", text)
+
+    def test_clear_thread(self) -> None:
+        self.db.upsert_schedule(
+            {
+                "id": "health",
+                "name": "Health",
+                "agent_id": "manager",
+                "cron_expr": "0 9 * * *",
+                "timezone": DEFAULT_TZ,
+                "prompt": "curl health",
+                "enabled": True,
+                "next_run_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        self.db.mark_schedule_running(
+            "health",
+            next_run_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            thread_id="42",
+            session_key="manager:discord:42",
+            thread_url="https://discord.com/channels/1/42",
+        )
+        self.db.mark_schedule_done("health", ok=True)
+        self.db.clear_schedule_thread("health")
+        row = self.db.get_schedule("health")
+        self.assertIsNone(row["last_thread_id"])
+        self.assertIsNone(row["last_session_key"])
+        self.assertIsNone(row["last_thread_url"])
+        self.assertEqual(row["last_status"], "ok")
+
+
+class CronPromptTests(unittest.TestCase):
+    def test_first_vs_reuse(self) -> None:
+        first = cron_prompt(name="Health", cron_expr="0 9 * * *", prompt="check")
+        self.assertIn("first run in this thread", first)
+        self.assertIn("check", first)
+        reused = cron_prompt(
+            name="Health", cron_expr="0 9 * * *", prompt="check", reused=True
+        )
+        self.assertIn("same thread, resume previous run", reused)
+
+
+class CronFireTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = ConfigStore(Path(self.tmp.name) / "gateway.db")
+        self.launched: list[dict[str, object]] = []
+
+        class _Cfg:
+            def __init__(self, db: ConfigStore) -> None:
+                self.db = db
+
+        class _Gw:
+            def __init__(self, db: ConfigStore, launched: list[dict[str, object]]) -> None:
+                self.config = _Cfg(db)
+                self._shutting_down = False
+                self._launched = launched
+
+            def cron_launcher(self, agent_id: str):
+                async def _launch(**kwargs: object) -> dict[str, str | None]:
+                    self._launched.append({"agent_id": agent_id, **kwargs})
+                    return {
+                        "thread_id": "99",
+                        "session_key": "manager:discord:99",
+                        "thread_url": "https://discord.com/channels/1/99",
+                    }
+
+                return _launch
+
+        self.sched = CronScheduler(_Gw(self.db, self.launched))  # type: ignore[arg-type]
+
+    async def asyncTearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    async def test_fire_passes_last_thread_id(self) -> None:
+        self.db.upsert_schedule(
+            {
+                "id": "health",
+                "name": "Health",
+                "agent_id": "manager",
+                "cron_expr": "0 9 * * *",
+                "timezone": DEFAULT_TZ,
+                "prompt": "curl health",
+                "enabled": True,
+                "next_run_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        self.db.mark_schedule_running(
+            "health",
+            next_run_at=(datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            thread_id="42",
+            session_key="manager:discord:42",
+            thread_url="https://discord.com/channels/1/42",
+        )
+        self.db.mark_schedule_done("health", ok=True)
+        result = await self.sched.fire("health", force=True)
+        self.assertEqual(result, "started")
+        self.assertEqual(len(self.launched), 1)
+        self.assertEqual(self.launched[0]["last_thread_id"], "42")
+        self.assertEqual(self.db.get_schedule("health")["last_thread_id"], "99")
 
 
 if __name__ == "__main__":

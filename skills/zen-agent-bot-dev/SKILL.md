@@ -175,7 +175,7 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 - ~~Master slash dispatch~~ ✅ — one Discord bot; `/music` `/general` `/manager` `/run`
 - OpenClaw-style extra bindings (non-home channels)
 - ~~cursor-sdk local~~ ✅ — `/backend cursor-sdk` (`sdk`); stream + cancel + resume; Accept/Deny still P3+
-- ~~Cron / scheduled jobs~~ ✅ — admin **Schedules** + `/schedule`; each run = new Discord thread
+- ~~Cron / scheduled jobs~~ ✅ — admin **Schedules** + `/schedule`; one Discord thread per schedule
 - ~~**`/handoff` + Ask Manager**~~ ✅ — pick agent or one-click manager; new public thread + transcript
 - ~~**OpenRouter chat window**~~ ✅ — SQLite last ~20 turns per thread; `/new` clears
 - Optional @mention wake in shared channels (default stays dedicated home channels)
@@ -210,7 +210,7 @@ Logs: `journalctl -u zen-agent-bot -f`, `data/logs/rebuild.log`, `journalctl -u 
 - Follow-up while busy → queued message + **Send now** / **Drop**; then runs
 - Running status bubble shows **Cancel** (same as `/cancel`; keep partial text)
 - Job finishes → same status bubble appends `✅ Done @you · 3m`; `/close` archives Discord thread and keeps `--resume`
-- Admin **Schedules** + `/schedule`; a due/run-now job opens a new thread in the agent home channel
+- Admin **Schedules** + `/schedule`; a due/run-now job posts in that schedule’s existing Discord thread (creates one on first run)
 - `/handoff agent:manager` from a thread, or tap **Ask Manager** on a General/music job-done bubble
 - Admin: allowlist add/remove without restart
 - After code change: `/rebuild` or `sudo systemctl restart zen-agent-bot`; verify `/health`

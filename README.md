@@ -57,7 +57,7 @@ uv run zen-agent-bot
 | **Check session** | `/status` (Discord) or admin **Status** page |
 | **Live jobs / errors** | Admin UI → **Status** (auto-refresh) |
 | **List fleet** | `/agents` |
-| **Cron** | Admin **Schedules** (create/enable/run) · `/schedule` lists · each run posts in the home channel and opens a **public Discord thread** |
+| **Cron** | Admin **Schedules** (create/enable/run) · `/schedule` lists · each schedule keeps **one public Discord thread** and posts every run there |
 | **Handoff** | `/handoff agent:manager note:…` from a thread (picker) · **Ask Manager** button on non-manager job-done bubbles |
 | **OpenRouter memory** | Last ~20 user/assistant turns in SQLite per thread (replayed each call). `/new` clears it |
 

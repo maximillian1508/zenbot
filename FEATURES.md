@@ -57,7 +57,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | Admin live status | ✅ | — | **done** | `/status` + `/api/status` |
 | Codex / other CLIs | ❌ | 🟢 each | P2 | ~50 lines per adapter |
 | cursor-sdk local | ✅ | — | **done** | `AsyncClient.launch_bridge`; stream + `/cancel` + resume; `/backend cursor-sdk` |
-| Cron schedules | ✅ | — | **done** | Admin Schedules + `/schedule`; new Discord thread per run |
+| Cron schedules | ✅ | — | **done** | Admin Schedules + `/schedule`; one Discord thread per schedule (resume) |
 | Thread handoff | ✅ | — | **done** | `/handoff` agent picker + **Ask Manager** button; new public thread + transcript |
 | OpenRouter chat window | ✅ | — | **done** | SQLite last ~20 turns per thread; `/new` / backend switch / admin Clear wipe |
 | Multi-workspace routing | ⚠️ per profile | 🟡 | P2 | Channel → workspace bindings |

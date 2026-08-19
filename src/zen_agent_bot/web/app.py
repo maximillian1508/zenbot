@@ -364,7 +364,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
       <h3 class="section">Manage</h3>
       <div class="settings-links">
         <a href="/agents">Agents<span>Profiles, Discord/Telegram tokens &amp; channels</span></a>
-        <a href="/schedules">Schedules<span>Cron jobs — each run opens a Discord thread</span></a>
+        <a href="/schedules">Schedules<span>Cron jobs — one Discord thread per schedule</span></a>
         <a href="/allowlist">Allowlist<span>Who can message the bots</span></a>
         <a href="/secrets">Secrets<span>API keys &amp; bot tokens (masked)</span></a>
       </div>
@@ -1094,6 +1094,9 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
                 f"<button type='submit'>{toggle}</button></form>"
                 f"<form method='post' action='/schedules/{html.escape(sid)}/run'>"
                 f"<button type='submit'>Run now</button></form>"
+                f"<form method='post' action='/schedules/{html.escape(sid)}/new-thread' "
+                f"onsubmit=\"return confirm('Next run will open a new Discord thread?');\">"
+                f"<button type='submit'>New thread</button></form>"
                 f"<a href='/schedules/{html.escape(sid)}/edit'>Edit</a>"
                 f"<form method='post' action='/schedules/{html.escape(sid)}/delete' "
                 f"onsubmit=\"return confirm('Delete {html.escape(sid)}?');\">"
@@ -1104,8 +1107,10 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         agents = db.list_agent_rows()
         agent_opts = _agent_options(str(agents[0]["id"]) if agents else "")
         body = f"""
-        <p class="hint">Each run posts in the home channel and opens a <strong>public Discord thread</strong> in that agent’s
-        home channel (no <code>--resume</code> from the previous run). 5-field cron in the
+        <p class="hint">Each schedule keeps <strong>one public Discord thread</strong> in that agent’s
+        home channel and posts each run there (unarchives if needed; <code>--resume</code> continues).
+        Use <strong>New thread</strong> if you want a fresh thread next run, or <code>/new</code> in
+        the thread to reset resume only. 5-field cron in the
         schedule timezone (default <code>{html.escape(DEFAULT_TZ)}</code>).
         Status auto-refresh 10s. Discord <code>/schedule</code> lists these.</p>
         <div class="table-wrap">
@@ -1198,8 +1203,9 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         sid = id.strip()
+        existing = db.get_schedule(sid) if sid else None
         if sid:
-            if db.get_schedule(sid) is None:
+            if existing is None:
                 raise HTTPException(404, "Unknown schedule")
         else:
             sid = _unique_schedule_id(name)
@@ -1216,6 +1222,8 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
                 "next_run_at": nxt,
             }
         )
+        if existing is not None and str(existing.get("agent_id")) != agent_id:
+            db.clear_schedule_thread(sid)
         return RedirectResponse("/schedules?saved=1", status_code=303)
 
     @app.post("/schedules/{schedule_id}/toggle")
@@ -1238,6 +1246,16 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         return RedirectResponse(
             f"/schedules?ran={quote(result)}", status_code=303
         )
+
+    @app.post("/schedules/{schedule_id}/new-thread")
+    async def schedules_new_thread(
+        schedule_id: str, _: None = Depends(require_auth)
+    ) -> RedirectResponse:
+        row = db.get_schedule(schedule_id)
+        if row is None:
+            raise HTTPException(404, "Unknown schedule")
+        db.clear_schedule_thread(schedule_id)
+        return RedirectResponse("/schedules?saved=1", status_code=303)
 
     @app.post("/schedules/{schedule_id}/delete")
     async def schedules_delete(

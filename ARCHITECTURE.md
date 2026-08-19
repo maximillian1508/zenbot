@@ -259,7 +259,7 @@ Billing reminder: [ROADMAP.md](./ROADMAP.md#billing--quota-important).
 - Transport tokens (`*_env` names) + **Secrets** page (values masked; SQLite, admin wins over `.env`)
 - Routing rules
 - Session list / clear / prune empty (`/close` archives Discord + keeps `--resume`)
-- **Schedules** (cron) — each run opens a new Discord thread; live status on running jobs
+- **Schedules** (cron) — one Discord thread per schedule; later runs post there and `--resume`; live status on running jobs
 - **Handoff** — `/handoff` + Ask Manager; transcript injected into a new public thread
 - **OpenRouter history** — `chat_turns` table; last ~20 user/assistant messages per session_key
 - Job queue / logs
