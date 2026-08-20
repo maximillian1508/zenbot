@@ -92,6 +92,38 @@ class SendNowRaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(handle.cancel_reason, "stopped by Cancel")
         self.assertFalse(await gw.cancel_session("idle"))
 
+    async def test_cancel_session_edits_status_immediately(self) -> None:
+        gw = _gateway()
+        gw._sessions = {}
+        state = _SessionState()
+        edited: list[tuple[str, object]] = []
+
+        async def edit(text: str, **kwargs: object) -> None:
+            edited.append((text, kwargs.get("view", "missing")))
+
+        async def progress_cb(_text: str) -> None:
+            return None
+
+        from zen_agent_bot.util.throttle import ThrottledProgress
+
+        handle = _RunHandle()
+        handle.display_name = "Zen Manager"
+        handle.edit_status = edit
+        handle.progress = ThrottledProgress(progress_cb, min_interval=0)
+        await handle.progress.push("⏳ **Agent running…**\n\nworking")
+        state.busy = True
+        state.run_handle = handle
+        gw._sessions["k"] = state
+
+        ok = await gw.cancel_session("k", reason="stopped by Cancel")
+        self.assertTrue(ok)
+        self.assertEqual(len(edited), 1)
+        self.assertIn("Cancelling", edited[0][0])
+        self.assertIn("stopped by Cancel", edited[0][0])
+        self.assertIsNone(edited[0][1])
+        await handle.progress.push("should not land")
+        self.assertEqual(len(edited), 1)
+
     async def test_missing_job(self) -> None:
         gw = _gateway()
         gw._sessions = {"k": _SessionState()}

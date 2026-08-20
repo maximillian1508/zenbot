@@ -141,6 +141,7 @@ class ClaudeCliBackend:
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workspace),
             limit=STREAM_STDOUT_LIMIT,
+            start_new_session=True,
         )
         if register_proc:
             register_proc(proc)
@@ -232,6 +233,7 @@ class ClaudeCliBackend:
             stderr=asyncio.subprocess.PIPE,
             cwd=str(workspace),
             limit=STREAM_STDOUT_LIMIT,
+            start_new_session=True,
         )
         if register_proc:
             register_proc(proc)
