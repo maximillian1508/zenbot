@@ -118,12 +118,43 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 | Feature | Effort | Note |
 |---------|--------|------|
 | Master slash dispatch (`/run music …`) | ✅ | One Discord bot; `/music` `/general` `/manager` + channel homes |
-| OpenClaw-style bindings | 🟠 | Channel → agent/workspace |
+| OpenClaw-style bindings | ✅ | Admin **Routing** + SQLite `route_bindings`; home channels win |
 | @mention wake in shared channels | 🟡 | Optional; dedicated `#agent` channels stay default |
-| Interactive tool approve (like CursorRemote) | 🔴 | **P3+ after cursor-sdk**; Discord Accept/Deny; CLI `--force` = no prompts |
+| Interactive tool approve (like CursorRemote) | 🔴 | **P3 — see below**; Discord Accept/Deny; CLI `--force` = no prompts today |
+| **Interactive control plane** | 🔴 ~1–2w | SDK approval bridge + secure prompt (sudo/secrets); not a raw Discord terminal |
 | Persistent memory (Hermes-style) | 🔴 | Use files/skills first |
 | Slack, WhatsApp | 🟡 each | Copy transport pattern |
 | Cursor SDK cloud runtime | 🟡 | Offload to Cursor VM |
+
+---
+
+## Interactive control plane (P3 — 2026-08-20)
+
+**Goal:** Interact with the agent from Discord/Telegram like CursorRemote — approve tools, answer prompts — without a full terminal emulator or `--force` on everything.
+
+**Not in scope:** scrollback REPL, arbitrary reverse shell, passwords in channel text.
+
+### Phases
+
+| # | Feature | Effort | Notes |
+|---|---------|--------|-------|
+| 3.1 | **SDK approval bridge** | 🟠 3–5d | Run `cursor-sdk` without blanket force when thread/admin opts in |
+| 3.2 | **Discord Accept / Deny** | 🟡 1–2d | Pending tool/shell → status message buttons; resume or cancel run |
+| 3.3 | **Secure prompt (modal)** | 🟡 2–3d | SDK “needs input” (sudo password, confirm) → Discord modal, ephemeral, ~60s TTL; never log or store |
+| 3.4 | **Per-thread `/trust` or admin default** | 🟢 0.5d | `force` (today) vs `approve` vs `approve+sudo-prompt`; default stays `force` for manager |
+| 3.5 | **Passwordless sudo allowlist** | 🟢 0.5d | Document + expand `sudoers` for known ops (`systemctl restart zen-agent-bot`, deploy scripts) — complements 3.3 |
+| 3.6 | **Telegram inline approve** | 🟡 1d | Same gateway actions as Discord buttons |
+
+**Default routing:** keep **`cursor-cli` + `--force`** for unattended server work. Use **`cursor-sdk` + approve mode** in threads where you want phone-gated ops.
+
+**Security rules (locked):**
+
+- Never accept secrets in normal channel messages.
+- Modal / ephemeral only; discard after inject; no SQLite, no logs.
+- Allowlist still required; approval buttons same auth as `/cancel`.
+- Do not ship a general Discord shell until 3.1–3.2 exist.
+
+**Depends on:** cursor-sdk local ✅. Blocks: nothing on P1/P2 — ship Telegram, bindings, skills prefix first if you want quick wins.
 
 ---
 
@@ -193,6 +224,7 @@ routing:
 13. ~~cron / scheduled jobs~~ ✅ — admin Schedules + `/schedule`; one Discord thread per schedule
 14. ~~cursor-sdk local~~ ✅ — `/backend cursor-sdk` (`sdk`); Accept/Deny still P3+
 15. extra bindings / OpenRouter tools
+16. **Interactive control plane (P3)** — SDK Approve/Deny + secure prompt for sudo/secrets; see dedicated section
 
 ---
 
@@ -213,7 +245,15 @@ Locked from planning with Maxi — keep these when picking backlog work.
 
 **Done extras:** OpenRouter chat backend; Claude Code backend; file attachments (Discord/TG → `data/attachments/`, paths in prompt; 25 MiB / 10 files).
 
-**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · ~~queue Send now button~~ ✅ · ~~per-thread `/backend`~~ ✅ · ~~job-done ping~~ ✅ · ~~`/close` / session hygiene~~ ✅ · ~~one-bot Discord + `/music` `/general`~~ ✅ · ~~cron / Schedules~~ ✅ · ~~`/handoff` + Ask Manager~~ ✅ · ~~cursor-sdk local~~ ✅ · bindings/routing · OpenRouter tools.
+**P2/P3 (explicitly wanted):** ~~model selection (admin + `/model`)~~ ✅ · ~~queue Send now button~~ ✅ · ~~per-thread `/backend`~~ ✅ · ~~job-done ping~~ ✅ · ~~`/close` / session hygiene~~ ✅ · ~~one-bot Discord + `/music` `/general`~~ ✅ · ~~cron / Schedules~~ ✅ · ~~`/handoff` + Ask Manager~~ ✅ · ~~cursor-sdk local~~ ✅ · bindings/routing · OpenRouter tools · **interactive control plane (P3)**.
+
+### Interactive control plane (2026-08-20)
+
+**Want:** approve/deny tools and answer sudo-style prompts from Discord — not a raw terminal.
+
+**Plan:** cursor-sdk without force → Discord Accept/Deny → optional secure modal for secrets (never channel text). Expand passwordless sudo for known deploy ops. Full spec: [Interactive control plane (P3)](#interactive-control-plane-p3--2026-08-20) above.
+
+**Near-term without P3:** `--force` + `/cancel` + allowlist + targeted `sudoers` entries.
 
 ### Model selection (2026-08-13)
 

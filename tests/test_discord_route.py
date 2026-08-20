@@ -11,6 +11,7 @@ from zen_agent_bot.transports.discord import (
     group_profiles_by_token,
     resolve_agent_name,
     resolve_agent_profile,
+    resolve_channel_route,
 )
 
 
@@ -95,6 +96,68 @@ class DiscordRouteTests(unittest.TestCase):
             allowlist_mentions([1, 2]),
             "<@1> <@2>",
         )
+
+    def test_resolve_channel_route_home_wins(self) -> None:
+        manager = _profile("manager", "tok", 10, manager=True)
+        music = _profile("music", "tok", 20)
+        by_ch = channel_profile_map([manager, music])
+        fleet = {manager.id: manager, music.id: music}
+
+        def lookup(_transport: str, channel_id: int) -> dict | None:
+            if channel_id == 10:
+                return {"agent_id": "music", "channel_id": "10"}
+            return None
+
+        route = resolve_channel_route(
+            by_channel=by_ch,
+            agents_by_id=fleet,
+            binding_lookup=lookup,
+            channel_id=10,
+            parent_id=None,
+        )
+        assert route is not None
+        self.assertEqual(route.profile.id, "manager")
+        self.assertIsNone(route.binding)
+
+    def test_resolve_channel_route_binding(self) -> None:
+        manager = _profile("manager", "tok", 10, manager=True)
+        by_ch = channel_profile_map([manager])
+        fleet = {manager.id: manager}
+        binding = {"agent_id": "manager", "channel_id": "99", "enabled": True}
+
+        def lookup(_transport: str, channel_id: int) -> dict | None:
+            return binding if channel_id == 99 else None
+
+        route = resolve_channel_route(
+            by_channel=by_ch,
+            agents_by_id=fleet,
+            binding_lookup=lookup,
+            channel_id=99,
+            parent_id=None,
+        )
+        assert route is not None
+        self.assertEqual(route.profile.id, "manager")
+        self.assertEqual(route.binding, binding)
+
+    def test_resolve_channel_route_thread_parent(self) -> None:
+        manager = _profile("manager", "tok", 10, manager=True)
+        by_ch = channel_profile_map([manager])
+        fleet = {manager.id: manager}
+        binding = {"agent_id": "manager", "channel_id": "99", "enabled": True}
+
+        def lookup(_transport: str, channel_id: int) -> dict | None:
+            return binding if channel_id == 99 else None
+
+        route = resolve_channel_route(
+            by_channel=by_ch,
+            agents_by_id=fleet,
+            binding_lookup=lookup,
+            channel_id=555,
+            parent_id=99,
+        )
+        assert route is not None
+        self.assertEqual(route.profile.id, "manager")
+        self.assertEqual(route.binding, binding)
 
 
 if __name__ == "__main__":

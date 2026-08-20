@@ -60,11 +60,14 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | Cron schedules | ✅ | — | **done** | Admin Schedules + `/schedule`; one Discord thread per schedule (resume) |
 | Thread handoff | ✅ | — | **done** | `/handoff` agent picker + **Ask Manager** button; new public thread + transcript |
 | OpenRouter chat window | ✅ | — | **done** | SQLite last ~20 turns per thread; `/new` / backend switch / admin Clear wipe |
-| Multi-workspace routing | ⚠️ per profile | 🟡 | P2 | Channel → workspace bindings |
-| OpenClaw-style bindings | ⚠️ 1:1 bots | 🟠 | P3 | YAML `routing:` rules |
+| Multi-workspace routing | ✅ | Admin **Routing** — channel → agent (+ optional workspace/backend) |
+| OpenClaw-style bindings | ✅ | Same as routing; skills accept short names (`zen-agent-bot-dev`) |
 | Notifications on job done | ✅ | — | **done** | Same-bubble `@you` + duration; skip Send now / `/close` |
 | Session hygiene `/close` | ✅ | — | **done** | Archive Discord thread; keep `--resume`; admin Clear deletes mapping |
-| Interactive approve/deny | ❌ | 🔴 | defer | Needs SDK bridge; CLI is force-or-nothing |
+| **Interactive approve/deny** | ❌ | 🔴 | **P3** | cursor-sdk bridge; Discord Accept/Deny on pending tools |
+| **Secure prompt (sudo/secrets)** | ❌ | 🟡 | **P3** | Discord modal, ephemeral, no persist; not channel reply |
+| **Per-thread trust mode** | ❌ | 🟢 | **P3** | `/trust force\|approve` or admin default; force stays default |
+| Passwordless sudo allowlist | ⚠️ ad hoc | 🟢 | **P3** | `sudoers` for deploy/restart; doc in repo |
 | Persistent memory | ❌ | 🟠 | defer | Files/skills first; not full Hermes |
 | MCP tool bridge | ❌ | 🔴 | defer | OpenClaw territory |
 | 20+ chat platforms | ❌ | 🔴 each | out of scope | Use OpenClaw |
@@ -106,6 +109,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 15. ~~**`/handoff` + Ask Manager**~~ ✅  
 16. ~~**OpenRouter chat-turn window**~~ ✅  
 17. ~~**cursor-sdk local**~~ ✅ — `/backend cursor-sdk` (or `sdk`); stream + cancel + resume  
-18. Phase 2/3: extra bindings · OpenRouter tools 
+18. Phase 2/3: extra bindings · OpenRouter tools  
+19. **P3 — Interactive control plane:** SDK Approve/Deny + secure prompt (sudo/secrets); not a Discord terminal
 
 See [ROADMAP.md](./ROADMAP.md) — **Decisions (2026-08-12)** + billing/phase detail.

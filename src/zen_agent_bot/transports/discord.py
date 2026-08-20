@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import discord
 from discord import app_commands
@@ -353,6 +354,37 @@ def resolve_agent_profile(
     return by_channel.get(channel_id)
 
 
+@dataclass(frozen=True)
+class RouteMatch:
+    profile: AgentProfile
+    binding: dict[str, Any] | None = None
+
+
+def resolve_channel_route(
+    *,
+    by_channel: dict[int, AgentProfile],
+    agents_by_id: dict[str, AgentProfile],
+    binding_lookup: Callable[[str, int], dict[str, Any] | None],
+    channel_id: int,
+    parent_id: int | None,
+    transport: str = "discord",
+) -> RouteMatch | None:
+    """Home channels win; else match an enabled route binding on channel/parent."""
+    home = resolve_agent_profile(
+        by_channel, channel_id=channel_id, parent_id=parent_id
+    )
+    if home is not None:
+        return RouteMatch(profile=home, binding=None)
+    lookup_id = parent_id if parent_id is not None else channel_id
+    binding = binding_lookup(transport, lookup_id)
+    if binding is None:
+        return None
+    profile = agents_by_id.get(str(binding["agent_id"]))
+    if profile is None:
+        return None
+    return RouteMatch(profile=profile, binding=binding)
+
+
 async def save_discord_attachments(
     message: discord.Message,
     dest_dir: Path,
@@ -421,15 +453,14 @@ class AgentDiscordBot(discord.Client):
         self.by_id = {p.id: p for p in profiles}
         self.has_manager = any(p.is_manager for p in profiles)
 
-    def _profile_for_channel(
-        self,
-        channel: discord.abc.Messageable | None,
-    ) -> AgentProfile | None:
+    def _channel_ids(
+        self, channel: discord.abc.Messageable | None
+    ) -> tuple[int | None, int | None]:
         if channel is None:
-            return None
+            return None, None
         channel_id = getattr(channel, "id", None)
         if not isinstance(channel_id, int):
-            return None
+            return None, None
         parent_id: int | None = None
         if isinstance(channel, discord.Thread):
             parent = channel.parent
@@ -437,9 +468,33 @@ class AgentDiscordBot(discord.Client):
                 parent_id = parent.id
             elif channel.parent_id:
                 parent_id = int(channel.parent_id)
-        return resolve_agent_profile(
-            self.by_channel, channel_id=channel_id, parent_id=parent_id
+        return channel_id, parent_id
+
+    def _binding_lookup(self, transport: str, channel_id: int) -> dict[str, Any] | None:
+        return self.gateway.config.db.binding_for_channel(transport, channel_id)
+
+    def _resolve_route(
+        self, channel: discord.abc.Messageable | None
+    ) -> RouteMatch | None:
+        channel_id, parent_id = self._channel_ids(channel)
+        if channel_id is None:
+            return None
+        fleet = {p.id: p for p in self.gateway.agents.all()}
+        fleet.update(self.by_id)
+        return resolve_channel_route(
+            by_channel=self.by_channel,
+            agents_by_id=fleet,
+            binding_lookup=self._binding_lookup,
+            channel_id=channel_id,
+            parent_id=parent_id,
         )
+
+    def _profile_for_channel(
+        self,
+        channel: discord.abc.Messageable | None,
+    ) -> AgentProfile | None:
+        route = self._resolve_route(channel)
+        return route.profile if route else None
 
     async def _require_ctx(
         self, interaction: discord.Interaction
@@ -455,7 +510,7 @@ class AgentDiscordBot(discord.Client):
         if profile is None:
             await interaction.response.send_message(
                 "Not an agent channel or thread. Use `/music`, `/general`, `/manager`, "
-                "or post in that agent's home channel.",
+                "post in that agent's home channel, or a bound route channel.",
                 ephemeral=True,
             )
             return None
@@ -575,7 +630,13 @@ class AgentDiscordBot(discord.Client):
         mention: str | None,
         schedule_id: str | None = None,
         on_done: Any = None,
+        binding: dict[str, Any] | None = None,
     ) -> None:
+        workspace_override: Path | None = None
+        if binding and binding.get("workspace"):
+            workspace_override = Path(str(binding["workspace"])).expanduser()
+        if binding and binding.get("backend"):
+            self.gateway.store.set_backend(sess_key, str(binding["backend"]))
         async def send(text_out: str, *, _status: discord.Message = status_msg) -> None:
             await send_chunks_reply(_status, text_out)
 
@@ -611,6 +672,7 @@ class AgentDiscordBot(discord.Client):
                 on_done=on_done,
                 done_view=done_view,
                 running_view=CancelJobView(self.gateway, sess_key),
+                workspace_override=workspace_override,
             ),
             name=f"agent-{sess_key}",
         )
@@ -625,6 +687,7 @@ class AgentDiscordBot(discord.Client):
         saved: list[SavedAttachment],
         title_src: str,
         preview_text: str,
+        binding: dict[str, Any] | None = None,
     ) -> discord.Thread:
         title = title_from_prompt(title_src)
         thread = await home.create_thread(name=title[:100], auto_archive_duration=10080)
@@ -655,8 +718,22 @@ class AgentDiscordBot(discord.Client):
             prompt=prompt,
             status_msg=status_msg,
             mention=getattr(author, "mention", None),
+            binding=binding,
         )
         return thread
+
+    def _is_route_wake(
+        self,
+        channel: discord.abc.Messageable,
+        route: RouteMatch,
+    ) -> bool:
+        if not isinstance(channel, discord.TextChannel):
+            return False
+        if route.binding is not None:
+            return str(channel.id) == str(route.binding["channel_id"])
+        if route.profile.discord is None:
+            return False
+        return channel.id == route.profile.discord.agent_channel_id
 
     async def launch_cron_run(
         self,
@@ -1240,8 +1317,11 @@ class AgentDiscordBot(discord.Client):
         if not self.gateway.is_allowed(message.author.id):
             return
 
-        profile = self._profile_for_channel(message.channel)
-        if profile is None or profile.discord is None:
+        route = self._resolve_route(message.channel)
+        if route is None:
+            return
+        profile = route.profile
+        if route.binding is None and profile.discord is None:
             return
 
         text = message.content.strip()
@@ -1263,18 +1343,16 @@ class AgentDiscordBot(discord.Client):
 
         title_src = text or (saved[0].original_name if saved else "attachment")
 
-        if (
-            isinstance(channel, discord.TextChannel)
-            and channel.id == profile.discord.agent_channel_id
-        ):
+        if self._is_route_wake(channel, route):
             await self._open_thread_and_run(
                 profile=profile,
-                home=channel,
+                home=channel,  # type: ignore[arg-type]
                 author=message.author,
                 prompt=prompt,
                 saved=saved,
                 title_src=title_src,
                 preview_text=text,
+                binding=route.binding,
             )
             return
 
@@ -1285,6 +1363,7 @@ class AgentDiscordBot(discord.Client):
             prompt=prompt,
             status_msg=status_msg,
             mention=message.author.mention,
+            binding=route.binding,
         )
 
 

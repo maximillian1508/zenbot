@@ -173,16 +173,25 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 **P2 / Phase 2–3 (wanted)**
 
 - ~~Master slash dispatch~~ ✅ — one Discord bot; `/music` `/general` `/manager` `/run`
-- OpenClaw-style extra bindings (non-home channels)
+- ~~OpenClaw-style extra bindings (non-home channels)~~ ✅ — admin **Routing** + `route_bindings`
 - ~~cursor-sdk local~~ ✅ — `/backend cursor-sdk` (`sdk`); stream + cancel + resume; Accept/Deny still P3+
 - ~~Cron / scheduled jobs~~ ✅ — admin **Schedules** + `/schedule`; one Discord thread per schedule
 - ~~**`/handoff` + Ask Manager**~~ ✅ — pick agent or one-click manager; new public thread + transcript
 - ~~**OpenRouter chat window**~~ ✅ — SQLite last ~20 turns per thread; `/new` clears
 - Optional @mention wake in shared channels (default stays dedicated home channels)
 
+**P3 — interactive control plane (2026-08-20)**
+
+- SDK approval bridge → Discord **Accept / Deny** on pending tools (cursor-sdk, not `--force` CLI)
+- Secure prompt via Discord **modal** for sudo/secrets (ephemeral, no SQLite/logs/channel text)
+- Per-thread **`/trust`** or admin default: `force` | `approve` | `approve+prompt`
+- Passwordless **sudoers** allowlist for known deploy ops (complements modal)
+- Telegram inline approve (after Discord v1)
+- **Not building:** full Discord terminal / reverse shell
+
 **Out of scope / defer**
 
-- Interactive tool approve (Accept/Deny) — **P3+ after cursor-sdk**; today `--force` auto-approves; near-term = `/cancel` + allowlist
+- ~~Interactive tool approve~~ → **P3 epic above** (scoped; not deferred indefinitely)
 - Persistent memory (Hermes-style)
 - 20+ chat platforms (use OpenClaw)
 - Voice

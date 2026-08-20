@@ -76,6 +76,7 @@ class _QueuedJob:
     on_done: Callable[["JobResult"], Awaitable[None]] | None = None
     done_view: object | None = None
     running_view: object | None = None
+    workspace_override: Path | None = None
 
 
 @dataclass
@@ -83,6 +84,9 @@ class _RunHandle:
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     proc: asyncio.subprocess.Process | None = None
     cancel_reason: str = "stopped"
+    progress: ThrottledProgress | None = None
+    edit_status: EditText | None = None
+    display_name: str = "Agent"
 
     def register_proc(self, proc: asyncio.subprocess.Process) -> None:
         self.proc = proc
@@ -90,8 +94,28 @@ class _RunHandle:
     async def cancel(self, reason: str = "stopped by /cancel") -> None:
         self.cancel_reason = reason
         self.cancel_event.set()
-        if self.proc is not None:
-            await terminate_process(self.proc)
+        if self.progress is not None:
+            self.progress.stop()
+        if self.edit_status is not None:
+            try:
+                existing = self.progress.latest if self.progress else ""
+                await self.edit_status(
+                    _status_with_footer(
+                        existing=existing,
+                        emoji="🛑",
+                        title="Cancelling",
+                        display_name=self.display_name,
+                        reason=reason,
+                    ),
+                    view=None,
+                )
+            except Exception:
+                log.exception("Failed to mark job as cancelling")
+        proc = self.proc
+        if proc is not None:
+            asyncio.create_task(
+                terminate_process(proc), name="terminate-cancelled-job"
+            )
 
 
 def _status_with_footer(
@@ -295,6 +319,7 @@ class Gateway:
         on_done: Callable[[JobResult], Awaitable[None]] | None = None,
         done_view: object | None = None,
         running_view: object | None = None,
+        workspace_override: Path | None = None,
     ) -> JobResult:
         if self._shutting_down:
             await edit_status("⚠️ Gateway is shutting down — try again after restart.")
@@ -313,6 +338,7 @@ class Gateway:
             on_done=on_done,
             done_view=done_view,
             running_view=running_view,
+            workspace_override=workspace_override,
         )
         async with state.lock:
             ahead = queued_count(state.pending, stop=_STOP) + (1 if state.busy else 0)
@@ -575,6 +601,7 @@ class Gateway:
     async def _execute_job(self, job: _QueuedJob) -> JobResult:
         state = self._sessions[job.session_key]
         run_handle = _RunHandle()
+        run_handle.edit_status = job.edit_status
         state.run_handle = run_handle
         await job.edit_status("⏳ Agent running…", view=job.running_view)
         cursor_key = self.config.db.resolve_secret("CURSOR_API_KEY")
@@ -582,18 +609,21 @@ class Gateway:
             os.environ["CURSOR_API_KEY"] = cursor_key
 
         profile = self.agents.get(job.agent_id)
+        run_handle.display_name = profile.display_name
         sess = self.store.get(job.session_key)
+        workspace = job.workspace_override or profile.workspace
         backend_name = self.resolved_backend(job.agent_id, job.session_key).backend
         resolved = resolve_model(self.config.db, job.session_key, backend_name)
         full_prompt = build_prompt(
             agent_id=profile.id,
             display_name=profile.display_name,
             backend=backend_name,
-            workspace=profile.workspace,
+            workspace=workspace,
             system_prompt=profile.system_prompt(self.config.project_root),
             skill_paths=profile.skills,
             user_message=job.user_prompt,
             model=resolved.model,
+            project_root=self.config.project_root,
         )
 
         async with self._global_sem:
@@ -602,6 +632,7 @@ class Gateway:
                 if self.config.streaming_enabled
                 else None
             )
+            run_handle.progress = progress
             history = (
                 self.config.db.list_chat_turns(job.session_key)
                 if backend_name == "openrouter"
@@ -610,7 +641,7 @@ class Gateway:
             try:
                 result = await self.backend_for(job.agent_id, job.session_key).run(
                     prompt=full_prompt,
-                    workspace=profile.workspace,
+                    workspace=workspace,
                     session_id=sess.session_id,
                     on_progress=progress.push if progress else None,
                     cancel_event=run_handle.cancel_event,

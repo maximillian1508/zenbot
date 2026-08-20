@@ -86,6 +86,19 @@ CREATE TABLE IF NOT EXISTS schedules (
     last_thread_url TEXT,
     run_count INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS route_bindings (
+    id TEXT PRIMARY KEY,
+    transport TEXT NOT NULL DEFAULT 'discord',
+    channel_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    workspace TEXT,
+    backend TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(transport, channel_id)
+);
 """
 
 
@@ -682,6 +695,95 @@ class ConfigStore:
                 (next_run_at, now, schedule_id),
             )
             self._conn.commit()
+
+    def _binding_dict(self, row: sqlite3.Row) -> dict[str, Any]:
+        data = dict(row)
+        data["enabled"] = bool(data.get("enabled"))
+        return data
+
+    def list_route_bindings(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT * FROM route_bindings ORDER BY enabled DESC, transport, channel_id"
+        ).fetchall()
+        return [self._binding_dict(r) for r in rows]
+
+    def get_route_binding(self, binding_id: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT * FROM route_bindings WHERE id = ?", (binding_id,)
+        ).fetchone()
+        return self._binding_dict(row) if row else None
+
+    def binding_for_channel(
+        self, transport: str, channel_id: str | int
+    ) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            """
+            SELECT * FROM route_bindings
+            WHERE transport = ? AND channel_id = ? AND enabled = 1
+            """,
+            (transport, str(channel_id)),
+        ).fetchone()
+        return self._binding_dict(row) if row else None
+
+    def upsert_route_binding(self, row: dict[str, Any]) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        created = str(row.get("created_at") or now)
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO route_bindings(
+                    id, transport, channel_id, agent_id, workspace, backend,
+                    enabled, note, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    transport = excluded.transport,
+                    channel_id = excluded.channel_id,
+                    agent_id = excluded.agent_id,
+                    workspace = excluded.workspace,
+                    backend = excluded.backend,
+                    enabled = excluded.enabled,
+                    note = excluded.note,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    row["id"],
+                    row.get("transport") or "discord",
+                    str(row["channel_id"]),
+                    row["agent_id"],
+                    row.get("workspace") or None,
+                    row.get("backend") or None,
+                    1 if row.get("enabled", True) else 0,
+                    row.get("note") or None,
+                    created,
+                    now,
+                ),
+            )
+            self._conn.commit()
+
+    def delete_route_binding(self, binding_id: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM route_bindings WHERE id = ?", (binding_id,)
+            )
+            self._conn.commit()
+
+    def set_route_binding_enabled(self, binding_id: str, enabled: bool) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE route_bindings SET enabled = ?, updated_at = ? WHERE id = ?",
+                (1 if enabled else 0, now, binding_id),
+            )
+            self._conn.commit()
+
+    def home_channel_ids(self) -> set[str]:
+        rows = self._conn.execute(
+            """
+            SELECT discord_channel_id FROM agents
+            WHERE discord_enabled = 1 AND discord_channel_id IS NOT NULL
+            """
+        ).fetchall()
+        return {str(r["discord_channel_id"]) for r in rows if r["discord_channel_id"]}
 
     def prune_empty_sessions(self) -> int:
         """Delete rows with no resume id (overrides-only leftovers)."""

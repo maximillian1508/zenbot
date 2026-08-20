@@ -365,6 +365,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
       <div class="settings-links">
         <a href="/agents">Agents<span>Profiles, Discord/Telegram tokens &amp; channels</span></a>
         <a href="/schedules">Schedules<span>Cron jobs — one Discord thread per schedule</span></a>
+        <a href="/routing">Routing<span>Extra Discord channels → agent profiles</span></a>
         <a href="/allowlist">Allowlist<span>Who can message the bots</span></a>
         <a href="/secrets">Secrets<span>API keys &amp; bot tokens (masked)</span></a>
       </div>
@@ -460,6 +461,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             ("/", "Dashboard", "dashboard"),
             ("/status", "Status", "status"),
             ("/schedules", "Schedules", "schedules"),
+            ("/routing", "Routing", "routing"),
             ("/sessions", "Sessions", "sessions"),
         ]
         nav_parts = []
@@ -791,6 +793,129 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             raise HTTPException(400, str(exc)) from exc
         return RedirectResponse("/allowlist?saved=1", status_code=303)
 
+    @app.get("/routing", response_class=HTMLResponse)
+    async def routing_get(
+        request: Request, _: None = Depends(require_auth)
+    ) -> HTMLResponse:
+        bindings = db.list_route_bindings()
+        homes = db.home_channel_ids()
+        agents = db.list_agent_rows()
+        agent_opts = "".join(
+            f'<option value="{html.escape(str(r["id"]))}">{html.escape(str(r["display_name"]))} ({html.escape(str(r["id"]))})</option>'
+            for r in agents
+        )
+        rows: list[str] = []
+        for row in bindings:
+            bid = str(row["id"])
+            cid = str(row["channel_id"])
+            home_note = (
+                ' <span class="badge warn">also home channel</span>'
+                if cid in homes
+                else ""
+            )
+            enabled = bool(row.get("enabled"))
+            status = '<span class="badge on">on</span>' if enabled else '<span class="badge">off</span>'
+            toggle_label = "Disable" if enabled else "Enable"
+            rows.append(
+                f"""<tr>
+                  <td><code>{html.escape(bid)}</code></td>
+                  <td><code>{html.escape(cid)}</code>{home_note}</td>
+                  <td><code>{html.escape(str(row.get("agent_id") or ""))}</code></td>
+                  <td>{html.escape(str(row.get("workspace") or "—"))}</td>
+                  <td>{html.escape(str(row.get("backend") or "—"))}</td>
+                  <td>{status}</td>
+                  <td>{html.escape(str(row.get("note") or ""))}</td>
+                  <td class="row-actions">
+                    <form method="post" action="/routing/{html.escape(bid)}/toggle">
+                      <button type="submit" class="secondary">{toggle_label}</button>
+                    </form>
+                    <form method="post" action="/routing/{html.escape(bid)}/delete"
+                          onsubmit="return confirm('Delete this route?');">
+                      <button type="submit" class="danger">Delete</button>
+                    </form>
+                  </td>
+                </tr>"""
+            )
+        msg = "Saved." if request.query_params.get("saved") else ""
+        body = f"""
+        <p class="hint">Bind extra Discord channels to an agent. Top-level messages open a thread
+        (same as a home channel). Agent <strong>home channels</strong> always win over bindings here.
+        Changes apply immediately — no restart.</p>
+        <div class="table-wrap">
+          <table>
+            <tr><th>ID</th><th>Channel</th><th>Agent</th><th>Workspace</th><th>Backend</th><th>On</th><th>Note</th><th></th></tr>
+            {"".join(rows) or "<tr><td colspan=8><em>none</em></td></tr>"}
+          </table>
+        </div>
+        <h3 class="section">Add or update binding</h3>
+        <form method="post" action="/routing/save">
+          <label>Binding ID (optional — defaults to discord-&lt;channel&gt;)
+            <input type="text" name="id" placeholder="discord-1539895214808895488"></label>
+          <label>Discord channel ID
+            <input type="text" name="channel_id" required pattern="[0-9]+" inputmode="numeric"></label>
+          <label>Agent
+            <select name="agent_id" required>{agent_opts}</select></label>
+          <label>Workspace override (optional)
+            <input type="text" name="workspace" placeholder="/home/maxi"></label>
+          <label>Backend override (optional)
+            <input type="text" name="backend" placeholder="cursor-cli, cursor-sdk, …"></label>
+          <label>Note
+            <input type="text" name="note" placeholder="e.g. routing test channel"></label>
+          <label><input type="checkbox" name="enabled" checked> Enabled</label>
+          <button type="submit">Save binding</button>
+        </form>
+        """
+        return page("Routing", body, msg, active="routing")
+
+    @app.post("/routing/save")
+    async def routing_save(
+        channel_id: str = Form(...),
+        agent_id: str = Form(...),
+        id: str = Form(""),
+        workspace: str = Form(""),
+        backend: str = Form(""),
+        note: str = Form(""),
+        enabled: str | None = Form(None),
+        _: None = Depends(require_auth),
+    ) -> RedirectResponse:
+        cid = channel_id.strip()
+        if not cid.isdigit():
+            raise HTTPException(400, "channel_id must be numeric")
+        binding_id = (id.strip() or f"discord-{cid}")[:64]
+        now = datetime.now(timezone.utc).isoformat()
+        existing = db.get_route_binding(binding_id)
+        db.upsert_route_binding(
+            {
+                "id": binding_id,
+                "transport": "discord",
+                "channel_id": cid,
+                "agent_id": agent_id.strip(),
+                "workspace": workspace.strip() or None,
+                "backend": backend.strip() or None,
+                "enabled": enabled is not None,
+                "note": note.strip() or None,
+                "created_at": (existing or {}).get("created_at") or now,
+            }
+        )
+        return RedirectResponse("/routing?saved=1", status_code=303)
+
+    @app.post("/routing/{binding_id}/toggle")
+    async def routing_toggle(
+        binding_id: str, _: None = Depends(require_auth)
+    ) -> RedirectResponse:
+        row = db.get_route_binding(binding_id)
+        if row is None:
+            raise HTTPException(404, "binding not found")
+        db.set_route_binding_enabled(binding_id, not bool(row.get("enabled")))
+        return RedirectResponse("/routing?saved=1", status_code=303)
+
+    @app.post("/routing/{binding_id}/delete")
+    async def routing_delete(
+        binding_id: str, _: None = Depends(require_auth)
+    ) -> RedirectResponse:
+        db.delete_route_binding(binding_id)
+        return RedirectResponse("/routing?saved=1", status_code=303)
+
     def _secret_names() -> list[str]:
         names = set(WELL_KNOWN_SECRETS)
         names.update(db.list_secret_names())
@@ -943,7 +1068,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             <input type="text" name="workspace" value="{html.escape(str(r.get('workspace') or '/home/maxi'))}"></label>
           <label>Default backend (<code>cursor-cli</code>, <code>cursor-sdk</code>, <code>claude-cli</code>, <code>openrouter</code>)
             <input type="text" name="default_backend" value="{html.escape(str(r.get('default_backend') or 'cursor-cli'))}"></label>
-          <label>Skills (one path per line)
+          <label>Skills (one skill name or path per line — e.g. <code>zen-agent-bot-dev</code>, <code>obsidian-vault</code>)
             <textarea name="skills">{html.escape(str(skills))}</textarea></label>
           <label>System prompt file
             <input type="text" name="system_prompt_file" value="{html.escape(str(r.get('system_prompt_file') or ''))}"></label>

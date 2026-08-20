@@ -39,10 +39,10 @@ agents:
     default_backend: cursor-cli
     system_prompt_file: agents/manager/SOUL.md
     skills:
-      - ~/.cursor/skills-cursor/create-skill/SKILL.md
-      - ~/apps/zen-agent-bot/skills/zen-agent-bot-dev/SKILL.md
-      - ~/.cursor/skills/obsidian-vault/SKILL.md
-      - ~/.cursor/skills/karakeep/SKILL.md
+      - create-skill
+      - zen-agent-bot-dev
+      - obsidian-vault
+      - karakeep
     discord:
       enabled: true
       token_env: DISCORD_TOKEN_MANAGER
