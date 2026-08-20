@@ -94,8 +94,9 @@ class OpenRouterBackend:
         register_proc: RegisterProc | None = None,
         model: str | None = None,
         history: list[dict[str, str]] | None = None,
+        approval_mode: str | None = None,
     ) -> AgentRunResult:
-        _ = workspace, register_proc  # chat-only; no subprocess
+        _ = workspace, register_proc, approval_mode  # chat-only; no subprocess
         new_session = self._session_id(session_id)
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
         payload = {

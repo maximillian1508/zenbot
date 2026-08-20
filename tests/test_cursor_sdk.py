@@ -168,6 +168,25 @@ class CursorSdkRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.session_id, "sdk-new")
         self.assertEqual(result.exit_code, 0)
 
+    async def test_approve_mode_disables_force(self) -> None:
+        run = FakeRun(chunks=("ok",), result="ok", agent_id="sdk-approve")
+        agent = FakeAgent(run, agent_id="sdk-approve")
+        client = FakeClient(agent)
+        backend = CursorSdkBackend(CursorSdkConfig(timeout_sec=5))
+        with patch(
+            "zen_agent_bot.backends.cursor_sdk.AsyncClient.launch_bridge",
+            new=AsyncMock(return_value=client),
+        ):
+            result = await backend.run(
+                prompt="hi",
+                workspace=self.workspace,
+                session_id=None,
+                approval_mode="approve",
+            )
+        self.assertEqual(result.exit_code, 0)
+        self.assertIsNotNone(agent.send_opts.local)
+        self.assertEqual(getattr(agent.send_opts.local, "force", None), False)
+
 
 def os_pop(name: str) -> str | None:
     import os

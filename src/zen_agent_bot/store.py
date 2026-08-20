@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     title TEXT,
     model TEXT,
     backend TEXT,
+    trust_mode TEXT,
     updated_at TEXT
 );
 CREATE TABLE IF NOT EXISTS secrets (
@@ -134,6 +135,8 @@ class ConfigStore:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN model TEXT")
         if "backend" not in cols:
             self._conn.execute("ALTER TABLE sessions ADD COLUMN backend TEXT")
+        if "trust_mode" not in cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN trust_mode TEXT")
 
     def close(self) -> None:
         self._conn.close()
@@ -355,7 +358,7 @@ class ConfigStore:
 
     def list_sessions(self) -> dict[str, dict[str, str | None]]:
         rows = self._conn.execute(
-            "SELECT session_key, session_id, title, model, backend, updated_at "
+            "SELECT session_key, session_id, title, model, backend, trust_mode, updated_at "
             "FROM sessions ORDER BY updated_at DESC, session_key"
         ).fetchall()
         return {
@@ -364,6 +367,7 @@ class ConfigStore:
                 "title": r["title"],
                 "model": r["model"],
                 "backend": r["backend"],
+                "trust_mode": r["trust_mode"],
                 "updated_at": r["updated_at"],
             }
             for r in rows
@@ -371,7 +375,7 @@ class ConfigStore:
 
     def get_session(self, key: str) -> dict[str, str | None]:
         row = self._conn.execute(
-            "SELECT session_id, title, model, backend FROM sessions WHERE session_key = ?",
+            "SELECT session_id, title, model, backend, trust_mode FROM sessions WHERE session_key = ?",
             (key,),
         ).fetchone()
         if not row:
@@ -380,12 +384,14 @@ class ConfigStore:
                 "title": None,
                 "model": None,
                 "backend": None,
+                "trust_mode": None,
             }
         return {
             "session_id": row["session_id"],
             "title": row["title"],
             "model": row["model"],
             "backend": row["backend"],
+            "trust_mode": row["trust_mode"],
         }
 
     def set_session(self, key: str, session_id: str | None, title: str | None) -> None:
@@ -431,6 +437,21 @@ class ConfigStore:
                     updated_at = excluded.updated_at
                 """,
                 (key, backend, now),
+            )
+            self._conn.commit()
+
+    def set_session_trust_mode(self, key: str, trust_mode: str | None) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO sessions(session_key, trust_mode, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(session_key) DO UPDATE SET
+                    trust_mode = excluded.trust_mode,
+                    updated_at = excluded.updated_at
+                """,
+                (key, trust_mode, now),
             )
             self._conn.commit()
 

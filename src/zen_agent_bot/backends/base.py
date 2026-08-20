@@ -42,4 +42,5 @@ class AgentBackend(Protocol):
         register_proc: RegisterProc | None = None,
         model: str | None = None,
         history: list[dict[str, str]] | None = None,
+        approval_mode: str | None = None,
     ) -> AgentRunResult: ...

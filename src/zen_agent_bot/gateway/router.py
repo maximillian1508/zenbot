@@ -33,6 +33,7 @@ from ..notify import append_status_line, format_job_done_ping, should_ping_done
 from ..schedule import format_schedules_markdown
 from ..sessions import SessionStore, ThreadSession
 from ..skills.loader import build_prompt
+from ..trust_mode import format_trust_status, parse_trust_arg, resolve_trust
 from ..util.proc import terminate_process
 from ..util.rebuild import request_rebuild as write_rebuild_flag, rebuild_pending
 from ..util.throttle import ThrottledProgress
@@ -613,6 +614,7 @@ class Gateway:
         sess = self.store.get(job.session_key)
         workspace = job.workspace_override or profile.workspace
         backend_name = self.resolved_backend(job.agent_id, job.session_key).backend
+        trust = resolve_trust(sess.trust_mode, backend=backend_name)
         resolved = resolve_model(self.config.db, job.session_key, backend_name)
         full_prompt = build_prompt(
             agent_id=profile.id,
@@ -648,6 +650,7 @@ class Gateway:
                     register_proc=run_handle.register_proc,
                     model=resolved.model,
                     history=history,
+                    approval_mode=trust.mode,
                 )
             except Exception as exc:
                 log.exception("Agent run failed for %s", job.agent_id)
@@ -900,6 +903,26 @@ class Gateway:
         if include_catalog:
             text += "\n\n" + format_backend_catalog(known, current=after.backend)
         return text
+
+    def apply_trust_command(
+        self,
+        *,
+        session_key: str,
+        agent_id: str,
+        raw: str | None,
+    ) -> str:
+        backend_name = self.resolved_backend(agent_id, session_key).backend
+        try:
+            action, value = parse_trust_arg(raw)
+        except ValueError as exc:
+            return f"⚠️ {exc}"
+        if action == "set":
+            self.store.set_trust_mode(session_key, value)
+        elif action == "clear":
+            self.store.set_trust_mode(session_key, None)
+        sess = self.store.get(session_key)
+        resolved = resolve_trust(sess.trust_mode, backend=backend_name)
+        return format_trust_status(resolved, backend=backend_name)
 
     def request_rebuild(self, *, reason: str = "") -> Path:
         """Ask the host systemd watcher to rebuild this stack (data/REQUEST_REBUILD)."""

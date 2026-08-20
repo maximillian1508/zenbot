@@ -11,6 +11,7 @@ class ThreadSession:
     title: str | None = None
     model: str | None = None
     backend: str | None = None
+    trust_mode: str | None = None
 
 
 class SessionStore:
@@ -24,6 +25,7 @@ class SessionStore:
             title=row.get("title"),
             model=row.get("model"),
             backend=row.get("backend"),
+            trust_mode=row.get("trust_mode"),
         )
 
     def set(self, thread_key: str, session: ThreadSession) -> None:
@@ -34,6 +36,9 @@ class SessionStore:
 
     def set_backend(self, thread_key: str, backend: str | None) -> None:
         self.db.set_session_backend(thread_key, backend)
+
+    def set_trust_mode(self, thread_key: str, trust_mode: str | None) -> None:
+        self.db.set_session_trust_mode(thread_key, trust_mode)
 
     def reset_resume(self, thread_key: str) -> None:
         self.db.reset_session_resume(thread_key)

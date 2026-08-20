@@ -266,6 +266,7 @@ RESERVED_SLASH = frozenset(
         "close",
         "model",
         "backend",
+        "trust",
         "agents",
         "rebuild",
         "run",
@@ -914,6 +915,9 @@ class AgentDiscordBot(discord.Client):
             msg += "\n\n" + await self.gateway.apply_model_command(
                 session_key=key, agent_id=profile.id, raw=None
             )
+            msg += "\n" + self.gateway.apply_trust_command(
+                session_key=key, agent_id=profile.id, raw=None
+            )
             await interaction.response.send_message(msg, ephemeral=True)
 
         @self.tree.command(
@@ -1065,6 +1069,51 @@ class AgentDiscordBot(discord.Client):
                     continue
                 display = f"{label} · {mid}" if label != mid else mid
                 choices.append(app_commands.Choice(name=display[:100], value=mid[:100]))
+                if len(choices) >= 25:
+                    break
+            return choices
+
+        @self.tree.command(
+            name="trust",
+            description="Show or set trust mode for cursor-sdk in this thread",
+        )
+        @app_commands.describe(name="force, approve, or clear/default")
+        async def cmd_trust(
+            interaction: discord.Interaction, name: str | None = None
+        ) -> None:
+            ctx = await self._require_ctx(interaction)
+            if ctx is None:
+                return
+            profile, channel = ctx
+            key = self.gateway.session_key(profile.id, "discord", thread_key(channel))
+            msg = self.gateway.apply_trust_command(
+                session_key=key,
+                agent_id=profile.id,
+                raw=name,
+            )
+            await interaction.response.send_message(msg, ephemeral=True)
+
+        @cmd_trust.autocomplete("name")
+        async def trust_autocomplete(
+            interaction: discord.Interaction, current: str
+        ) -> list[app_commands.Choice[str]]:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                return []
+            q = current.lower().strip()
+            rows = [
+                ("force", "auto-approve sdk tools"),
+                ("approve", "ask for approvals (sdk)"),
+                ("clear", "use backend default"),
+                ("default", "use backend default"),
+            ]
+            choices: list[app_commands.Choice[str]] = []
+            for mode, label in rows:
+                hay = f"{mode} {label}".lower()
+                if q and q not in hay:
+                    continue
+                choices.append(
+                    app_commands.Choice(name=f"{label} · {mode}"[:100], value=mode[:100])
+                )
                 if len(choices) >= 25:
                     break
             return choices

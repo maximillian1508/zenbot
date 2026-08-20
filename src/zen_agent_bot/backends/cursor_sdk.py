@@ -16,6 +16,7 @@ from cursor_sdk import (
 )
 
 from ..model_select import CURSOR_SDK_FALLBACK
+from ..trust_mode import TRUST_FORCE
 from .base import AgentRunResult, ProgressCallback, RegisterProc
 
 if TYPE_CHECKING:
@@ -138,6 +139,7 @@ class CursorSdkBackend:
         register_proc: RegisterProc | None = None,
         model: str | None = None,
         history: list[dict[str, str]] | None = None,
+        approval_mode: str | None = None,
     ) -> AgentRunResult:
         _ = register_proc, history
         keep_id = usable_sdk_session_id(session_id)
@@ -166,9 +168,14 @@ class CursorSdkBackend:
                 )
                 async with agent:
                     agent_id = getattr(agent, "agent_id", None) or keep_id
+                    force_mode = (approval_mode or TRUST_FORCE).strip().lower() == TRUST_FORCE
                     send_opts = SendOptions(
                         model=resolved_model,
-                        local=LocalSendOptions(force=True) if self.config.force else None,
+                        local=(
+                            LocalSendOptions(force=force_mode)
+                            if self.config.force
+                            else None
+                        ),
                     )
                     run = await agent.send(prompt, send_opts)
                     text, result = await asyncio.wait_for(
