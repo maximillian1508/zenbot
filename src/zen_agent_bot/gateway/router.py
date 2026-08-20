@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from ..agents.registry import AgentRegistry
+from ..approvals import ApprovalBridge
 from ..backends.base import AgentBackend, is_stream_line_too_large
 from ..config.load import GatewayConfig
 from ..backend_select import (
@@ -227,6 +228,37 @@ class Gateway:
         self._cursor_models_cache: tuple[float, list[tuple[str, str]]] | None = None
         self._cron_launchers: dict[str, Callable[..., Awaitable[dict[str, str | None]]]] = {}
         self.scheduler: Any = None
+        self.approvals = ApprovalBridge()
+        self._approval_view_factory: Callable[[str, str], object] | None = None
+
+    def set_approval_view_factory(
+        self, factory: Callable[[str, str], object] | None
+    ) -> None:
+        """factory(session_key, approval_id) -> discord.ui.View"""
+        self._approval_view_factory = factory
+
+    async def request_tool_approval(
+        self,
+        *,
+        session_key: str,
+        kind: str,
+        summary: str,
+        detail: str = "",
+        timeout_sec: float = 300.0,
+    ) -> bool:
+        def attach(approval_id: str) -> object | None:
+            if self._approval_view_factory is None:
+                return None
+            return self._approval_view_factory(session_key, approval_id)
+
+        return await self.approvals.request(
+            session_key=session_key,
+            kind=kind,
+            summary=summary,
+            detail=detail,
+            timeout_sec=timeout_sec,
+            attach_view=attach,
+        )
 
     def session_key(self, agent_id: str, transport: str, channel_id: str | int) -> str:
         return f"{agent_id}:{transport}:{channel_id}"
@@ -628,6 +660,14 @@ class Gateway:
             project_root=self.config.project_root,
         )
 
+        if trust.mode == "approve" and backend_name == "cursor-sdk":
+            self.approvals.bind_job(
+                session_key=job.session_key,
+                workspace=workspace,
+                edit_status=job.edit_status,
+                display_name=profile.display_name,
+            )
+
         async with self._global_sem:
             progress = (
                 ThrottledProgress(job.edit_status)
@@ -635,6 +675,12 @@ class Gateway:
                 else None
             )
             run_handle.progress = progress
+
+            async def on_progress(text: str) -> None:
+                self.approvals.update_progress(job.session_key, text)
+                if progress is not None:
+                    await progress.push(text)
+
             history = (
                 self.config.db.list_chat_turns(job.session_key)
                 if backend_name == "openrouter"
@@ -645,7 +691,7 @@ class Gateway:
                     prompt=full_prompt,
                     workspace=workspace,
                     session_id=sess.session_id,
-                    on_progress=progress.push if progress else None,
+                    on_progress=on_progress if progress else None,
                     cancel_event=run_handle.cancel_event,
                     register_proc=run_handle.register_proc,
                     model=resolved.model,
@@ -679,6 +725,8 @@ class Gateway:
             finally:
                 if progress:
                     await progress.flush()
+                if trust.mode == "approve" and backend_name == "cursor-sdk":
+                    self.approvals.unbind_job(job.session_key)
 
         if result.error == "cancelled":
             # Prefer last streamed Discord/Telegram status over backend stub text.

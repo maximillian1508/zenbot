@@ -204,6 +204,64 @@ class CancelJobView(discord.ui.View):
         self.stop()
 
 
+class ApproveDenyView(discord.ui.View):
+    """Accept / Deny a pending cursor-sdk tool approval."""
+
+    def __init__(self, gateway: Gateway, session_key: str, approval_id: str) -> None:
+        super().__init__(timeout=None)
+        self.gateway = gateway
+        self.session_key = session_key
+        self.approval_id = approval_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user and self.gateway.is_allowed(interaction.user.id):
+            return True
+        if interaction.response.is_done():
+            await interaction.followup.send("Not authorized.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Not authorized.", ephemeral=True)
+        return False
+
+    async def _decide(
+        self, interaction: discord.Interaction, *, allow: bool
+    ) -> None:
+        await interaction.response.defer()
+        ok = self.gateway.approvals.resolve(
+            self.approval_id,
+            allow=allow,
+            reason=f"discord:{interaction.user.id if interaction.user else '?'}",
+        )
+        label = "Accepted" if allow else "Denied"
+        if ok:
+            await interaction.followup.send(f"{label}.", ephemeral=True)
+            try:
+                await interaction.message.edit(view=None)
+            except discord.HTTPException:
+                pass
+            self.stop()
+        else:
+            await interaction.followup.send(
+                "Already resolved or expired.", ephemeral=True
+            )
+            try:
+                await interaction.message.edit(view=None)
+            except discord.HTTPException:
+                pass
+            self.stop()
+
+    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
+    async def accept(
+        self, interaction: discord.Interaction, button: discord.ui.Button[Any]
+    ) -> None:
+        await self._decide(interaction, allow=True)
+
+    @discord.ui.button(label="Deny", style=discord.ButtonStyle.danger)
+    async def deny(
+        self, interaction: discord.Interaction, button: discord.ui.Button[Any]
+    ) -> None:
+        await self._decide(interaction, allow=False)
+
+
 async def send_chunks(target: Messageable, text: str) -> None:
     if len(text) <= DISCORD_CHUNK:
         await target.send(text)
@@ -1101,8 +1159,8 @@ class AgentDiscordBot(discord.Client):
                 return []
             q = current.lower().strip()
             rows = [
-                ("force", "auto-approve sdk tools"),
-                ("approve", "ask for approvals (sdk)"),
+                ("force", "tools auto-run (default)"),
+                ("approve", "Discord Accept/Deny via hooks"),
                 ("clear", "use backend default"),
                 ("default", "use backend default"),
             ]
@@ -1425,6 +1483,12 @@ async def run_discord_bots(
     if not profiles:
         log.warning("No Discord agents configured")
         return
+
+    gateway.set_approval_view_factory(
+        lambda session_key, approval_id: ApproveDenyView(
+            gateway, session_key, approval_id
+        )
+    )
 
     tasks: list[asyncio.Task[None]] = []
     for token, group in group_profiles_by_token(profiles):

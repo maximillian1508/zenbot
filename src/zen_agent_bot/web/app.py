@@ -1447,4 +1447,62 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
             out["rebuild_pending"] = st["rebuild_pending"]
         return out
 
+    def _check_approval_token(request: Request) -> None:
+        if gateway is None:
+            raise HTTPException(503, "gateway not attached")
+        auth = request.headers.get("authorization") or ""
+        token = ""
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+        if not token:
+            token = request.headers.get("x-zenbot-approval-token", "").strip()
+        if not token or not secrets.compare_digest(token, gateway.approvals.token):
+            raise HTTPException(401, "unauthorized")
+
+    @app.post("/internal/approvals")
+    async def internal_approval_request(request: Request) -> JSONResponse:
+        """Hook endpoint: block until Discord Accept/Deny (or timeout)."""
+        _check_approval_token(request)
+        assert gateway is not None
+        try:
+            payload = await request.json()
+        except Exception as exc:
+            raise HTTPException(400, "invalid json") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(400, "expected object")
+        kind = str(payload.get("kind") or "shell").strip() or "shell"
+        summary = str(payload.get("summary") or payload.get("command") or kind)
+        detail = str(payload.get("detail") or payload.get("command") or "")
+        cwd = payload.get("cwd")
+        session_key = payload.get("session_key")
+        timeout_sec = float(payload.get("timeout_sec") or 300)
+        resolved = gateway.approvals.resolve_session_key(
+            session_key=str(session_key) if session_key else None,
+            cwd=str(cwd) if cwd else None,
+        )
+        if not resolved:
+            return JSONResponse(
+                {"permission": "deny", "reason": "no active approve-mode job"},
+                status_code=409,
+            )
+        allowed = await gateway.request_tool_approval(
+            session_key=resolved,
+            kind=kind,
+            summary=summary,
+            detail=detail,
+            timeout_sec=timeout_sec,
+        )
+        return JSONResponse(
+            {
+                "permission": "allow" if allowed else "deny",
+                "session_key": resolved,
+            }
+        )
+
+    @app.get("/internal/approvals/pending")
+    async def internal_approval_pending(request: Request) -> JSONResponse:
+        _check_approval_token(request)
+        assert gateway is not None
+        return JSONResponse({"pending": gateway.approvals.list_pending()})
+
     return app

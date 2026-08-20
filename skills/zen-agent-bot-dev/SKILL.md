@@ -182,9 +182,9 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 
 **P3 — interactive control plane (2026-08-20)**
 
-- SDK approval bridge → Discord **Accept / Deny** on pending tools (cursor-sdk, not `--force` CLI)
+- ~~SDK approval bridge → Discord **Accept / Deny** on pending tools~~ ✅ — hooks + `/trust approve` + cursor-sdk
 - Secure prompt via Discord **modal** for sudo/secrets (ephemeral, no SQLite/logs/channel text)
-- Per-thread **`/trust`** or admin default: `force` | `approve` | `approve+prompt`
+- ~~Per-thread **`/trust`**~~ ✅ — `force` | `approve` (admin default still later)
 - Passwordless **sudoers** allowlist for known deploy ops (complements modal)
 - Telegram inline approve (after Discord v1)
 - **Not building:** full Discord terminal / reverse shell

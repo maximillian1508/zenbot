@@ -16,7 +16,7 @@ from cursor_sdk import (
 )
 
 from ..model_select import CURSOR_SDK_FALLBACK
-from ..trust_mode import TRUST_FORCE
+from ..trust_mode import TRUST_APPROVE, TRUST_FORCE
 from .base import AgentRunResult, ProgressCallback, RegisterProc
 
 if TYPE_CHECKING:
@@ -99,10 +99,11 @@ class CursorSdkBackend:
     def _model(self, model: str | None) -> str:
         return (model or self.config.model or CURSOR_SDK_FALLBACK).strip() or CURSOR_SDK_FALLBACK
 
-    def _local(self, workspace: Path) -> LocalAgentOptions:
+    def _local(self, workspace: Path, *, auto_review: bool = False) -> LocalAgentOptions:
         return LocalAgentOptions(
             cwd=str(workspace),
             setting_sources=["all"],
+            auto_review=True if auto_review else None,
         )
 
     async def _open_agent(
@@ -153,7 +154,10 @@ class CursorSdkBackend:
 
         resolved_model = self._model(model)
         api_key = self._api_key()
-        local = self._local(Path(workspace))
+        # LocalSendOptions.force means "expire a stuck prior run", not tool auto-approve.
+        # Tool gating for trust=approve uses auto_review + Discord hooks.
+        want_review = (approval_mode or TRUST_FORCE).strip().lower() == TRUST_APPROVE
+        local = self._local(Path(workspace), auto_review=want_review)
         run: Any = None
         agent_id = keep_id
 
@@ -168,14 +172,9 @@ class CursorSdkBackend:
                 )
                 async with agent:
                     agent_id = getattr(agent, "agent_id", None) or keep_id
-                    force_mode = (approval_mode or TRUST_FORCE).strip().lower() == TRUST_FORCE
                     send_opts = SendOptions(
                         model=resolved_model,
-                        local=(
-                            LocalSendOptions(force=force_mode)
-                            if self.config.force
-                            else None
-                        ),
+                        local=LocalSendOptions(force=True) if self.config.force else None,
                     )
                     run = await agent.send(prompt, send_opts)
                     text, result = await asyncio.wait_for(

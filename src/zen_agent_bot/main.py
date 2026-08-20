@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import signal
+from pathlib import Path
 
 import uvicorn
 from telegram.ext import Application
@@ -17,6 +18,14 @@ from .transports.telegram import run_telegram_bots
 from .web import create_admin_app
 
 log = logging.getLogger(__name__)
+
+
+def _write_approval_token(data_dir: Path, token: str) -> None:
+    path = data_dir / "approvals" / "token"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(token + "\n", encoding="utf-8")
+    path.chmod(0o600)
+    log.info("Wrote Discord approval token to %s", path)
 
 
 async def run_admin_server(
@@ -68,6 +77,7 @@ async def _shutdown_services(
 async def run_gateway() -> None:
     config = load_config()
     gateway = Gateway(config)
+    _write_approval_token(config.data_dir, gateway.approvals.token)
 
     has_discord = bool(config.agents.discord_agents())
     has_telegram = bool(config.agents.telegram_agents())

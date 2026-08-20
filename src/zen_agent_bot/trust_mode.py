@@ -48,4 +48,8 @@ def format_trust_status(resolved: ResolvedTrust, *, backend: str) -> str:
     note = ""
     if backend != "cursor-sdk":
         note = " (only applies to cursor-sdk)"
+    elif resolved.mode == TRUST_APPROVE:
+        note = " — SDK auto-review on; shell/MCP hooks can wait for Discord Accept/Deny"
+    elif resolved.mode == TRUST_FORCE:
+        note = " — tools auto-run (headless default)"
     return f"Trust mode `{resolved.mode}` from **{resolved.source}**{note}."

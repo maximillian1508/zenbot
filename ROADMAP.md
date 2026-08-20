@@ -138,10 +138,10 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 
 | # | Feature | Effort | Notes |
 |---|---------|--------|-------|
-| 3.1 | **SDK approval bridge** | 🟠 3–5d | Run `cursor-sdk` without blanket force when thread/admin opts in |
-| 3.2 | **Discord Accept / Deny** | 🟡 1–2d | Pending tool/shell → status message buttons; resume or cancel run |
+| 3.1 | **SDK approval bridge** | ✅ | Hooks wait on Discord; `/internal/approvals` + token file |
+| 3.2 | **Discord Accept / Deny** | ✅ | Status-bubble Accept/Deny for trust=`approve` shell/MCP |
 | 3.3 | **Secure prompt (modal)** | 🟡 2–3d | SDK “needs input” (sudo password, confirm) → Discord modal, ephemeral, ~60s TTL; never log or store |
-| 3.4 | **Per-thread `/trust` or admin default** | 🟢 0.5d | `force` (today) vs `approve` vs `approve+sudo-prompt`; default stays `force` for manager |
+| 3.4 | **Per-thread `/trust` or admin default** | ✅ | `/trust force\|approve`; default `force`; SDK `autoReview` when approve |
 | 3.5 | **Passwordless sudo allowlist** | 🟢 0.5d | Document + expand `sudoers` for known ops (`systemctl restart zen-agent-bot`, deploy scripts) — complements 3.3 |
 | 3.6 | **Telegram inline approve** | 🟡 1d | Same gateway actions as Discord buttons |
 

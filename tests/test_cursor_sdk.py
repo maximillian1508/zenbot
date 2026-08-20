@@ -168,7 +168,7 @@ class CursorSdkRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.session_id, "sdk-new")
         self.assertEqual(result.exit_code, 0)
 
-    async def test_approve_mode_disables_force(self) -> None:
+    async def test_approve_mode_enables_auto_review(self) -> None:
         run = FakeRun(chunks=("ok",), result="ok", agent_id="sdk-approve")
         agent = FakeAgent(run, agent_id="sdk-approve")
         client = FakeClient(agent)
@@ -184,8 +184,13 @@ class CursorSdkRunTests(unittest.IsolatedAsyncioTestCase):
                 approval_mode="approve",
             )
         self.assertEqual(result.exit_code, 0)
+        # LocalSendOptions.force stays True (stuck-run recovery).
         self.assertIsNotNone(agent.send_opts.local)
-        self.assertEqual(getattr(agent.send_opts.local, "force", None), False)
+        self.assertEqual(getattr(agent.send_opts.local, "force", None), True)
+        # Trust=approve enables auto_review on create/resume local options.
+        local = client.created.get("local") if client.created else None
+        self.assertIsNotNone(local)
+        self.assertEqual(getattr(local, "auto_review", None), True)
 
 
 def os_pop(name: str) -> str | None:
