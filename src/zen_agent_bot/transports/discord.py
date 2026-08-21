@@ -186,7 +186,7 @@ class CancelJobView(discord.ui.View):
     async def cancel(
         self, interaction: discord.Interaction, button: discord.ui.Button[Any]
     ) -> None:
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         if await self.gateway.cancel_session(
             self.session_key, reason="stopped by Cancel"
         ):
@@ -212,6 +212,7 @@ class ApproveDenyView(discord.ui.View):
         self.gateway = gateway
         self.session_key = session_key
         self.approval_id = approval_id
+        self._decided = False
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user and self.gateway.is_allowed(interaction.user.id):
@@ -225,7 +226,25 @@ class ApproveDenyView(discord.ui.View):
     async def _decide(
         self, interaction: discord.Interaction, *, allow: bool
     ) -> None:
+        if self._decided:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "Already resolved.", ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    "Already resolved.", ephemeral=True
+                )
+            return
+        self._decided = True
         await interaction.response.defer()
+        for child in self.children:
+            if isinstance(child, discord.ui.Button):
+                child.disabled = True
+        try:
+            await interaction.message.edit(view=self)
+        except discord.HTTPException:
+            pass
         ok = self.gateway.approvals.resolve(
             self.approval_id,
             allow=allow,
@@ -234,20 +253,15 @@ class ApproveDenyView(discord.ui.View):
         label = "Accepted" if allow else "Denied"
         if ok:
             await interaction.followup.send(f"{label}.", ephemeral=True)
-            try:
-                await interaction.message.edit(view=None)
-            except discord.HTTPException:
-                pass
-            self.stop()
         else:
             await interaction.followup.send(
                 "Already resolved or expired.", ephemeral=True
             )
-            try:
-                await interaction.message.edit(view=None)
-            except discord.HTTPException:
-                pass
-            self.stop()
+        try:
+            await interaction.message.edit(view=None)
+        except discord.HTTPException:
+            pass
+        self.stop()
 
     @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
     async def accept(

@@ -6,6 +6,7 @@ import os
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from cursor_sdk import (
@@ -16,7 +17,6 @@ from cursor_sdk import (
 )
 
 from ..model_select import CURSOR_SDK_FALLBACK
-from ..trust_mode import TRUST_APPROVE, TRUST_FORCE
 from .base import AgentRunResult, ProgressCallback, RegisterProc
 
 if TYPE_CHECKING:
@@ -72,8 +72,14 @@ async def _cancel_run(run: Any) -> None:
         return
     if hasattr(run, "supports") and not run.supports("cancel"):
         return
-    with suppress(Exception):
+    try:
         await run.cancel()
+    except Exception:
+        log.debug("cursor-sdk run.cancel failed", exc_info=True)
+
+
+def _cancelled_run_result(*, text: str, agent_id: str | None) -> SimpleNamespace:
+    return SimpleNamespace(status="cancelled", result=text, agent_id=agent_id)
 
 
 class CursorSdkBackend:
@@ -142,7 +148,7 @@ class CursorSdkBackend:
         history: list[dict[str, str]] | None = None,
         approval_mode: str | None = None,
     ) -> AgentRunResult:
-        _ = register_proc, history
+        _ = history
         keep_id = usable_sdk_session_id(session_id)
         if cancel_event is not None and cancel_event.is_set():
             return AgentRunResult(
@@ -155,14 +161,19 @@ class CursorSdkBackend:
         resolved_model = self._model(model)
         api_key = self._api_key()
         # LocalSendOptions.force means "expire a stuck prior run", not tool auto-approve.
-        # Tool gating for trust=approve uses auto_review + Discord hooks.
-        want_review = (approval_mode or TRUST_FORCE).strip().lower() == TRUST_APPROVE
-        local = self._local(Path(workspace), auto_review=want_review)
+        # Trust=approve gates shell/MCP via Discord hooks only; native auto_review
+        # would race the hook and flash Accept/Deny before restoring Cancel.
+        _ = approval_mode
+        local = self._local(Path(workspace), auto_review=False)
         run: Any = None
         agent_id = keep_id
 
         try:
             async with await AsyncClient.launch_bridge(workspace=str(workspace)) as client:
+                owned = getattr(client, "_owned_bridge", None)
+                bridge_proc = getattr(owned, "process", None) if owned else None
+                if register_proc is not None and bridge_proc is not None:
+                    register_proc(bridge_proc)
                 agent = await self._open_agent(
                     client,
                     session_id=session_id,
@@ -231,6 +242,7 @@ class CursorSdkBackend:
         cancel_event: asyncio.Event | None,
     ) -> tuple[str, Any]:
         text = ""
+        agent_id = getattr(run, "agent_id", None)
         watcher: asyncio.Task[None] | None = None
         if cancel_event is not None:
 
@@ -242,12 +254,42 @@ class CursorSdkBackend:
         try:
             if on_progress is not None:
                 async for chunk in run.iter_text():
+                    if cancel_event is not None and cancel_event.is_set():
+                        break
                     if not chunk:
                         continue
                     text += chunk
                     await on_progress(_format_progress(text))
-            result = await run.wait()
-            return text, result
+            if cancel_event is not None and cancel_event.is_set():
+                await _cancel_run(run)
+                return text, _cancelled_run_result(text=text, agent_id=agent_id)
+
+            wait_task = asyncio.create_task(run.wait())
+            try:
+                if cancel_event is not None:
+                    cancel_task = asyncio.create_task(cancel_event.wait())
+                    done, _ = await asyncio.wait(
+                        {wait_task, cancel_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if cancel_task in done and cancel_event.is_set():
+                        wait_task.cancel()
+                        with suppress(asyncio.CancelledError, Exception):
+                            await wait_task
+                        await _cancel_run(run)
+                        return text, _cancelled_run_result(text=text, agent_id=agent_id)
+                    if not wait_task.done():
+                        cancel_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await cancel_task
+                result = await wait_task
+                agent_id = getattr(result, "agent_id", None) or agent_id
+                return text, result
+            finally:
+                if not wait_task.done():
+                    wait_task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await wait_task
         except asyncio.CancelledError:
             await _cancel_run(run)
             raise

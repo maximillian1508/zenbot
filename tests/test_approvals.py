@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from zen_agent_bot.approvals import ApprovalBridge
+from zen_agent_bot.approvals import MAX_APPROVALS_PER_JOB, ApprovalBridge
 
 
 class ApprovalBridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -83,6 +83,185 @@ class ApprovalBridgeTests(unittest.IsolatedAsyncioTestCase):
                 bridge.resolve_session_key(session_key=None, cwd=str(workspace)),
                 "s1",
             )
+            bridge.unbind_job("s1")
+
+    async def test_approval_limit(self) -> None:
+        bridge = ApprovalBridge()
+        edits: list[tuple[str, dict[str, object]]] = []
+
+        async def edit(text: str, **kwargs: object) -> None:
+            edits.append((text, kwargs))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge.bind_job(
+                session_key="s1",
+                workspace=Path(tmp),
+                edit_status=edit,
+                display_name="Manager",
+                running_view="cancel-view",
+            )
+            for i in range(MAX_APPROVALS_PER_JOB):
+                task = asyncio.create_task(
+                    bridge.request(
+                        session_key="s1",
+                        kind="shell",
+                        summary=f"cmd-{i}",
+                        detail=f"cmd-{i}",
+                        timeout_sec=0.05,
+                    )
+                )
+                await asyncio.sleep(0.02)
+                pending = bridge.list_pending()
+                if pending:
+                    bridge.resolve(pending[0]["id"], allow=False, reason="test")
+                await task
+
+            allowed = await bridge.request(
+                session_key="s1",
+                kind="shell",
+                summary="over-limit",
+                detail="over-limit",
+                timeout_sec=0.05,
+            )
+            self.assertFalse(allowed)
+            self.assertEqual(len(bridge.list_pending()), 0)
+            limit_edits = [e for e in edits if "Approval limit" in e[0]]
+            self.assertTrue(limit_edits)
+            self.assertEqual(limit_edits[-1][1].get("view"), "cancel-view")
+            bridge.unbind_job("s1")
+
+    async def test_restore_running_view_after_resolve(self) -> None:
+        bridge = ApprovalBridge()
+        edits: list[tuple[str, dict[str, object]]] = []
+
+        async def edit(text: str, **kwargs: object) -> None:
+            edits.append((text, kwargs))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge.bind_job(
+                session_key="s1",
+                workspace=Path(tmp),
+                edit_status=edit,
+                display_name="Manager",
+                running_view="cancel-view",
+            )
+            bridge.update_progress("s1", "⏳ streaming…")
+            task = asyncio.create_task(
+                bridge.request(
+                    session_key="s1",
+                    kind="shell",
+                    summary="ls",
+                    detail="ls",
+                    timeout_sec=2,
+                )
+            )
+            await asyncio.sleep(0.05)
+            pending = bridge.list_pending()
+            bridge.resolve(pending[0]["id"], allow=True, reason="test")
+            await task
+            restore = [e for e in edits if e[1].get("view") == "cancel-view"]
+            self.assertTrue(restore)
+            self.assertIn("streaming", restore[-1][0])
+            bridge.unbind_job("s1")
+
+    async def test_cancel_during_approval_skips_restore(self) -> None:
+        bridge = ApprovalBridge()
+        edits: list[tuple[str, dict[str, object]]] = []
+        cancel = asyncio.Event()
+
+        async def edit(text: str, **kwargs: object) -> None:
+            edits.append((text, kwargs))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge.bind_job(
+                session_key="s1",
+                workspace=Path(tmp),
+                edit_status=edit,
+                display_name="Manager",
+                running_view="cancel-view",
+                cancel_event=cancel,
+            )
+            task = asyncio.create_task(
+                bridge.request(
+                    session_key="s1",
+                    kind="shell",
+                    summary="ls /tmp",
+                    detail="ls /tmp",
+                    timeout_sec=5,
+                )
+            )
+            await asyncio.sleep(0.05)
+            self.assertTrue(bridge.has_pending("s1"))
+            cancel.set()
+            allowed = await task
+            self.assertFalse(allowed)
+            restore = [e for e in edits if e[1].get("view") == "cancel-view"]
+            self.assertFalse(restore)
+            bridge.unbind_job("s1")
+
+    async def test_cancel_event_skips_restore_after_manual_resolve(self) -> None:
+        bridge = ApprovalBridge()
+        edits: list[tuple[str, dict[str, object]]] = []
+        cancel = asyncio.Event()
+
+        async def edit(text: str, **kwargs: object) -> None:
+            edits.append((text, kwargs))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge.bind_job(
+                session_key="s1",
+                workspace=Path(tmp),
+                edit_status=edit,
+                display_name="Manager",
+                running_view="cancel-view",
+                cancel_event=cancel,
+            )
+            task = asyncio.create_task(
+                bridge.request(
+                    session_key="s1",
+                    kind="shell",
+                    summary="ls",
+                    detail="ls",
+                    timeout_sec=2,
+                )
+            )
+            await asyncio.sleep(0.05)
+            pending = bridge.list_pending()
+            cancel.set()
+            bridge.resolve(pending[0]["id"], allow=True, reason="test")
+            await task
+            restore = [e for e in edits if e[1].get("view") == "cancel-view"]
+            self.assertFalse(restore)
+            bridge.unbind_job("s1")
+
+    async def test_progress_not_edited_while_awaiting(self) -> None:
+        bridge = ApprovalBridge()
+        edits: list[str] = []
+
+        async def edit(text: str, **kwargs: object) -> None:
+            edits.append(text)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge.bind_job(
+                session_key="s1",
+                workspace=Path(tmp),
+                edit_status=edit,
+                display_name="Manager",
+            )
+            task = asyncio.create_task(
+                bridge.request(
+                    session_key="s1",
+                    kind="shell",
+                    summary="ls",
+                    detail="ls",
+                    timeout_sec=0.2,
+                )
+            )
+            await asyncio.sleep(0.05)
+            self.assertTrue(bridge.is_awaiting("s1"))
+            await task
+            approval_edits = [e for e in edits if "Approval needed" in e]
+            self.assertTrue(approval_edits)
             bridge.unbind_job("s1")
 
 

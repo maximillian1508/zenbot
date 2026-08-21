@@ -168,11 +168,14 @@ class CursorSdkRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.session_id, "sdk-new")
         self.assertEqual(result.exit_code, 0)
 
-    async def test_approve_mode_enables_auto_review(self) -> None:
+    async def test_approve_mode_uses_hooks_not_native_auto_review(self) -> None:
         run = FakeRun(chunks=("ok",), result="ok", agent_id="sdk-approve")
         agent = FakeAgent(run, agent_id="sdk-approve")
         client = FakeClient(agent)
+        bridge = SimpleNamespace(process=object())
+        client._owned_bridge = bridge
         backend = CursorSdkBackend(CursorSdkConfig(timeout_sec=5))
+        proc_seen: list[object] = []
         with patch(
             "zen_agent_bot.backends.cursor_sdk.AsyncClient.launch_bridge",
             new=AsyncMock(return_value=client),
@@ -182,15 +185,50 @@ class CursorSdkRunTests(unittest.IsolatedAsyncioTestCase):
                 workspace=self.workspace,
                 session_id=None,
                 approval_mode="approve",
+                register_proc=proc_seen.append,
             )
         self.assertEqual(result.exit_code, 0)
-        # LocalSendOptions.force stays True (stuck-run recovery).
         self.assertIsNotNone(agent.send_opts.local)
         self.assertEqual(getattr(agent.send_opts.local, "force", None), True)
-        # Trust=approve enables auto_review on create/resume local options.
         local = client.created.get("local") if client.created else None
         self.assertIsNotNone(local)
-        self.assertEqual(getattr(local, "auto_review", None), True)
+        self.assertIsNone(getattr(local, "auto_review", None))
+        self.assertEqual(len(proc_seen), 1)
+
+    async def test_cancel_during_wait(self) -> None:
+        run = FakeRun(
+            chunks=(),
+            result="",
+            wait_after_first=True,
+            agent_id="sdk-wait",
+        )
+        agent = FakeAgent(run, agent_id="sdk-wait")
+        client = FakeClient(agent)
+        backend = CursorSdkBackend(CursorSdkConfig(timeout_sec=5))
+        cancel = asyncio.Event()
+
+        async def trigger_cancel() -> None:
+            await asyncio.sleep(0.05)
+            cancel.set()
+
+        with patch(
+            "zen_agent_bot.backends.cursor_sdk.AsyncClient.launch_bridge",
+            new=AsyncMock(return_value=client),
+        ):
+            task = asyncio.create_task(
+                backend.run(
+                    prompt="hi",
+                    workspace=self.workspace,
+                    session_id=None,
+                    cancel_event=cancel,
+                )
+            )
+            asyncio.create_task(trigger_cancel())
+            result = await task
+
+        self.assertEqual(result.exit_code, 130)
+        self.assertEqual(result.error, "cancelled")
+        self.assertTrue(run.cancel_called)
 
 
 def os_pop(name: str) -> str | None:
@@ -241,6 +279,7 @@ class FakeRun:
             self.status = "finished"
 
     async def wait(self):
+        await self._proceed.wait()
         status = "cancelled" if self.cancel_called else "finished"
         self.status = status
         return SimpleNamespace(

@@ -405,6 +405,7 @@ class Gateway:
         state = self._sessions.get(session_key)
         if state is None or not state.busy or state.run_handle is None:
             return False
+        self.approvals.cancel_job(session_key, reason=reason)
         await state.run_handle.cancel(reason)
         return True
 
@@ -666,6 +667,8 @@ class Gateway:
                 workspace=workspace,
                 edit_status=job.edit_status,
                 display_name=profile.display_name,
+                running_view=job.running_view,
+                cancel_event=run_handle.cancel_event,
             )
 
         async with self._global_sem:
@@ -678,7 +681,9 @@ class Gateway:
 
             async def on_progress(text: str) -> None:
                 self.approvals.update_progress(job.session_key, text)
-                if progress is not None:
+                if progress is not None and not self.approvals.is_awaiting(
+                    job.session_key
+                ):
                     await progress.push(text)
 
             history = (
@@ -724,7 +729,8 @@ class Gateway:
                 return failed
             finally:
                 if progress:
-                    await progress.flush()
+                    if not self.approvals.is_awaiting(job.session_key):
+                        await progress.flush()
                 if trust.mode == "approve" and backend_name == "cursor-sdk":
                     self.approvals.unbind_job(job.session_key)
 

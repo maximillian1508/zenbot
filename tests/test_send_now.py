@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import unittest
 
+from zen_agent_bot.approvals import ApprovalBridge
 from zen_agent_bot.gateway.router import Gateway, _QueuedJob, _RunHandle, _SessionState
 
 
 def _gateway() -> Gateway:
-    return Gateway.__new__(Gateway)
+    gw = Gateway.__new__(Gateway)
+    gw.approvals = ApprovalBridge()
+    return gw
 
 
 class SendNowRaceTests(unittest.IsolatedAsyncioTestCase):
