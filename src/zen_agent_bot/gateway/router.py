@@ -23,7 +23,10 @@ from ..backend_select import (
     resolve_backend,
 )
 from ..model_select import (
-    format_cursor_catalog,
+    BACKEND_CATALOG_TITLE,
+    CLAUDE_MODELS,
+    OPENROUTER_FALLBACK_MODELS,
+    format_model_catalog,
     format_model_status,
     model_in_catalog,
     parse_agent_models_output,
@@ -230,6 +233,7 @@ class Gateway:
         self._last_errors: deque[_ErrorRecord] = deque(maxlen=20)
         self._agent_status_cache: tuple[float, str] | None = None
         self._cursor_models_cache: tuple[float, list[tuple[str, str]]] | None = None
+        self._openrouter_models_cache: tuple[float, list[tuple[str, str]]] | None = None
         self._cron_launchers: dict[str, Callable[..., Awaitable[dict[str, str | None]]]] = {}
         self.scheduler: Any = None
         self.approvals = ApprovalBridge()
@@ -916,6 +920,47 @@ class Gateway:
         self._cursor_models_cache = (now, rows)
         return rows
 
+    async def openrouter_models(self, *, force: bool = False) -> list[tuple[str, str]]:
+        """OpenRouter public model catalog, cached; static fallback on error."""
+        now = time.monotonic()
+        if (
+            not force
+            and self._openrouter_models_cache is not None
+            and now - self._openrouter_models_cache[0] < 600
+        ):
+            return self._openrouter_models_cache[1]
+        rows: list[tuple[str, str]] = []
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=8) as client:
+                resp = await client.get("https://openrouter.ai/api/v1/models")
+                resp.raise_for_status()
+                data = resp.json()
+            for item in data.get("data", []):
+                mid = str(item.get("id") or "").strip()
+                if not mid:
+                    continue
+                rows.append((mid, str(item.get("name") or mid)))
+        except Exception:
+            log.debug("OpenRouter model list fetch failed", exc_info=True)
+        if not rows:
+            return list(OPENROUTER_FALLBACK_MODELS)
+        self._openrouter_models_cache = (now, rows)
+        return rows
+
+    async def models_for_backend(
+        self, backend: str, *, force: bool = False
+    ) -> list[tuple[str, str]]:
+        """Model catalog for the given backend (autocomplete + /model display)."""
+        if backend in ("cursor-cli", "cursor-sdk"):
+            return await self.cursor_models(force=force)
+        if backend == "claude-cli":
+            return list(CLAUDE_MODELS)
+        if backend == "openrouter":
+            return await self.openrouter_models(force=force)
+        return []
+
     async def apply_model_command(
         self,
         *,
@@ -936,17 +981,27 @@ class Gateway:
             self.store.set_model(session_key, None)
         resolved = resolve_model(self.config.db, session_key, backend_name)
         text = format_model_status(resolved)
-        if backend_name not in ("cursor-cli", "cursor-sdk"):
-            return text
-        models = await self.cursor_models()
-        if action == "set" and value and models and not model_in_catalog(value, models):
-            text += (
-                f"\n⚠️ `{value}` is not in `agent models` — CLI may reject it. "
-                "Use `/model` with no args to see IDs."
-            )
-        if include_catalog:
-            text += "\n\n" + format_cursor_catalog(
+        models = await self.models_for_backend(backend_name)
+        if action == "set" and value and models:
+            known = model_in_catalog(value, models)
+            if not known and backend_name == "claude-cli":
+                # Dated snapshot ids (claude-sonnet-5-YYYYMMDD) are valid.
+                known = any(value.startswith(mid) for mid, _ in models)
+            if not known:
+                source = (
+                    "`agent models`"
+                    if backend_name in ("cursor-cli", "cursor-sdk")
+                    else f"the known {backend_name} list"
+                )
+                text += (
+                    f"\n⚠️ `{value}` is not in {source} — double-check the id. "
+                    "Use `/model` with no args to browse."
+                )
+        if include_catalog and (models or backend_name in ("cursor-cli", "cursor-sdk")):
+            text += "\n\n" + format_model_catalog(
                 models,
+                title=BACKEND_CATALOG_TITLE.get(backend_name, "Models"),
+                empty_note="_Could not load the model list (`agent models`)._",
                 current=resolved.model,
                 max_chars=catalog_max_chars,
             )

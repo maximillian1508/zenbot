@@ -1123,10 +1123,10 @@ class AgentDiscordBot(discord.Client):
 
         @self.tree.command(
             name="model",
-            description="Show Cursor models or set the model for this thread",
+            description="Show models for this thread's backend or set one",
         )
         @app_commands.describe(
-            name="Model id from agent models, or clear/default"
+            name="Model id for the thread's backend, or clear/default"
         )
         async def cmd_model(
             interaction: discord.Interaction, name: str | None = None
@@ -1159,7 +1159,15 @@ class AgentDiscordBot(discord.Client):
                 ("default", "admin / CLI default"),
             ]
             try:
-                models = await self.gateway.cursor_models()
+                backend = "cursor-cli"
+                channel = interaction.channel
+                profile = self._profile_for_channel(channel) if channel else None
+                if profile is not None and channel is not None:
+                    key = self.gateway.session_key(
+                        profile.id, "discord", thread_key(channel)
+                    )
+                    backend = self.gateway.resolved_backend(profile.id, key).backend
+                models = await self.gateway.models_for_backend(backend)
             except Exception:
                 models = []
             for mid, label in extras + models:

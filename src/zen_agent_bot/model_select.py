@@ -21,6 +21,36 @@ BACKEND_MODEL_SETTING = {
 }
 OPENROUTER_FALLBACK = "anthropic/claude-sonnet-4"
 CURSOR_SDK_FALLBACK = "composer-2.5"
+
+# Static catalog for claude-cli (`claude -p --model …`); aliases resolve to the
+# latest snapshot. Dated snapshot ids (e.g. claude-sonnet-5-20250929) also work.
+CLAUDE_MODELS: list[tuple[str, str]] = [
+    ("claude-fable-5", "Claude Fable 5 — most capable"),
+    ("claude-opus-5", "Claude Opus 5"),
+    ("claude-sonnet-5", "Claude Sonnet 5"),
+    ("claude-haiku-4-5", "Claude Haiku 4.5 — fast"),
+    ("opus", "alias — latest Opus"),
+    ("sonnet", "alias — latest Sonnet"),
+    ("haiku", "alias — latest Haiku"),
+]
+
+# Fallback when the OpenRouter model API is unreachable; any id can still be
+# typed — this only feeds autocomplete/catalog display.
+OPENROUTER_FALLBACK_MODELS: list[tuple[str, str]] = [
+    (OPENROUTER_FALLBACK, "Claude Sonnet 4 (gateway default)"),
+    ("anthropic/claude-opus-4.1", "Claude Opus 4.1"),
+    ("openai/gpt-5", "GPT-5"),
+    ("openai/gpt-5-mini", "GPT-5 mini"),
+    ("google/gemini-2.5-pro", "Gemini 2.5 Pro"),
+    ("google/gemini-2.5-flash", "Gemini 2.5 Flash"),
+]
+
+BACKEND_CATALOG_TITLE = {
+    "cursor-cli": "Cursor CLI models",
+    "cursor-sdk": "Cursor CLI models",
+    "claude-cli": "Claude models",
+    "openrouter": "OpenRouter models",
+}
 OPENROUTER_ONLINE_SETTING = "backend.openrouter.online"
 OPENROUTER_ONLINE_ENV = "OPENROUTER_ONLINE"
 ONLINE_SUFFIX = ":online"
@@ -173,16 +203,18 @@ def parse_agent_models_output(text: str) -> list[tuple[str, str]]:
     return rows
 
 
-def format_cursor_catalog(
+def format_model_catalog(
     models: list[tuple[str, str]],
     *,
+    title: str = "Cursor CLI models",
+    empty_note: str = "_Could not load the model list._",
     current: str | None = None,
     max_chars: int = 1400,
     featured: int = 16,
 ) -> str:
     if not models:
-        return "_Could not load Cursor model list (`agent models`)._"
-    header = f"**Cursor CLI models** ({len(models)} on this account):"
+        return empty_note
+    header = f"**{title}** ({len(models)}):"
     shown = list(models[:featured])
     shown_ids = {mid for mid, _ in shown}
     if current and current not in shown_ids:

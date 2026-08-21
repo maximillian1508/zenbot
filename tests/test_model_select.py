@@ -9,7 +9,7 @@ from zen_agent_bot.backends.cursor_cli import CursorCliBackend, CursorCliConfig
 from zen_agent_bot.model_select import (
     OPENROUTER_FALLBACK,
     apply_openrouter_online,
-    format_cursor_catalog,
+    format_model_catalog,
     openrouter_online_enabled,
     parse_agent_models_output,
     parse_model_arg,
@@ -69,12 +69,30 @@ class ParseAgentModelsTests(unittest.TestCase):
             ],
         )
 
+    def test_static_backend_catalogs(self) -> None:
+        from zen_agent_bot.model_select import (
+            BACKEND_CATALOG_TITLE,
+            CLAUDE_MODELS,
+            OPENROUTER_FALLBACK_MODELS,
+        )
+
+        claude_ids = [mid for mid, _ in CLAUDE_MODELS]
+        self.assertIn("claude-sonnet-5", claude_ids)
+        self.assertIn("sonnet", claude_ids)
+        self.assertTrue(OPENROUTER_FALLBACK_MODELS)
+        self.assertEqual(BACKEND_CATALOG_TITLE["claude-cli"], "Claude models")
+        text = format_model_catalog(CLAUDE_MODELS, title="Claude models")
+        self.assertIn("**Claude models**", text)
+        self.assertIn("`claude-fable-5`", text)
+        empty = format_model_catalog([], empty_note="_nope_")
+        self.assertEqual(empty, "_nope_")
+
     def test_catalog_marks_current(self) -> None:
         rows = parse_agent_models_output(SAMPLE_AGENT_MODELS)
-        text = format_cursor_catalog(rows, current="composer-2.5")
+        text = format_model_catalog(rows, current="composer-2.5")
         self.assertIn("`composer-2.5`", text)
         self.assertIn("←", text)
-        self.assertIn("4 on this account", text)
+        self.assertIn("(4)", text)
 
 
 class StoreSessionOverrideTests(unittest.TestCase):
