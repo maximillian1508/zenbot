@@ -5,7 +5,7 @@ Headless **agent gateway**: Discord (and optional Telegram) bots → Cursor Agen
 | Item | Value |
 |------|--------|
 | Admin UI | `https://agents.maximillianleonard.dev` (Traefik) or `http://127.0.0.1:8787` |
-| Runtime | **Host systemd + `uv`** (preferred) — Docker compose kept as legacy |
+| Runtime | **Host systemd + `uv`** on Linux (preferred) · **launchd LaunchAgent + `uv`** on macOS — Docker compose kept as legacy |
 | Config | SQLite `data/gateway.db` (agents, allowlist, sessions) |
 | Secrets | `.env` (mode `600`) — template `.env.example` |
 | Auth | Allowlist of Discord/Telegram user IDs; optional `ADMIN_PASSWORD` on admin UI |
@@ -25,6 +25,38 @@ curl -sS http://127.0.0.1:8787/health
 Or Discord **`/rebuild`** on @ZenManager (writes `data/REQUEST_REBUILD` → host restarts the unit).
 
 Requires **Cursor CLI** logged in as `maxi` (`agent login` / `agent status`).
+
+## Start / update (macOS — launchd)
+
+Same gateway, launchd instead of systemd. Runs as **your user** (a LaunchAgent, not
+root) because the agent needs your login context: `~/.cursor` / `~/.claude`
+credentials, `~/.ssh` keys, user `PATH`.
+
+```bash
+# one-time install (no sudo)
+~/apps/zen-agent-bot/scripts/install-launchd-service.sh
+
+# day-to-day
+launchctl kickstart -k gui/$(id -u)/dev.maximillianleonard.zen-agent-bot   # restart
+tail -f ~/apps/zen-agent-bot/data/logs/launchd.err.log                     # logs
+launchctl print gui/$(id -u)/dev.maximillianleonard.zen-agent-bot | head -20
+
+# remove
+~/apps/zen-agent-bot/scripts/install-launchd-service.sh --uninstall
+```
+
+`/rebuild` works the same way — the flag file is picked up by `WatchPaths`
+instead of a systemd path unit.
+
+**Mac-as-server caveats**
+
+- A LaunchAgent runs **only while you are logged in**. For unattended use enable
+  automatic login (or convert to a LaunchDaemon, which loses the user credentials
+  the agent needs).
+- Stop the Mac sleeping or the gateway drops offline: `sudo pmset -a sleep 0`.
+- launchd has **no cgroup memory cap**, so the systemd `MemoryMax=6G` guard has no
+  equivalent — a runaway agent is bounded only by system pressure.
+- The admin UI defaults to `127.0.0.1:8787` here (no Traefik-in-Docker to reach).
 
 ## Configure
 
@@ -100,7 +132,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md), [FEATURES.md](./FEATURES.md), [ROADMAP
 
 ## Deploy notes
 
-Preferred: **host systemd + uv**. `/rebuild` → `zenbot-rebuild.path` → `scripts/deploy.sh` → `systemctl restart zen-agent-bot` (~15s delay, `TimeoutStopSec=620`). Human ops: `~/ZEN-AGENT-BOT.md` (handbook after sync).
+Preferred: **host systemd + uv** (Linux) or **launchd + uv** (macOS). `/rebuild` writes `data/REQUEST_REBUILD` → `zenbot-rebuild.path` (systemd) or `WatchPaths` (launchd) → `scripts/deploy.sh` → `systemctl restart` / `launchctl kickstart -k` (~15s delay, 620s stop timeout so in-flight jobs drain). `deploy.sh` picks the init system from `uname` and honours `ZENBOT_INIT`, `ZENBOT_DRY_RUN`, `ZENBOT_FORCE_RESTART`. Human ops: `~/ZEN-AGENT-BOT.md` (handbook after sync).
 
 ```bash
 sudo /home/maxi/apps/zen-agent-bot/scripts/install-host-service.sh

@@ -15,7 +15,7 @@ description: >-
 |------|------|
 | Source (git) | `~/apps/zen-agent-bot` |
 | GitHub | `git@github.com:maximillian1508/zenbot.git` |
-| Deploy stack | Host systemd `zen-agent-bot.service` (`uv run`); Traefik file route |
+| Deploy stack | Linux: host systemd `zen-agent-bot.service` (`uv run`) + Traefik file route · macOS: launchd LaunchAgent (`scripts/install-launchd-service.sh`) |
 | Admin UI | `https://agents.maximillianleonard.dev` (Traefik → `host.docker.internal:8787`) |
 | Runtime data | `~/apps/zen-agent-bot/data/gateway.db` (SQLite; gitignored) |
 | Secrets | `~/apps/zen-agent-bot/.env` only — **never commit** |
@@ -73,6 +73,37 @@ curl -sS http://127.0.0.1:8787/health
 Unit `MemoryMax` must stay high enough for Cursor agent + node (default **6G**, `MemoryHigh=3G`). A **2G** cap OOM-kills the whole gateway mid-job → Discord stuck on “Agent running…” with no final reply. After unit changes: `sudo install -m 0644 deploy/systemd/zen-agent-bot.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart zen-agent-bot` (or re-run `install-host-service.sh`).
 
 The process runs as **maxi** with normal host access (`~/.ssh`, `agent`, `/srv`, docker CLI if in `docker` group). Admin listens on `0.0.0.0:8787` (required so Traefik-in-Docker can reach the host); Traefik file route exposes `agents.maximillianleonard.dev` on Tailscale. If Discord resumes fail with `attempt to write a readonly database`, chown root-owned files under `~/.cursor` left by the old Docker container.
+
+## Deploy (macOS — launchd)
+
+```bash
+~/apps/zen-agent-bot/scripts/install-launchd-service.sh            # install (no sudo)
+launchctl kickstart -k gui/$(id -u)/dev.maximillianleonard.zen-agent-bot   # restart
+tail -f ~/apps/zen-agent-bot/data/logs/launchd.err.log             # logs
+~/apps/zen-agent-bot/scripts/install-launchd-service.sh --uninstall
+```
+
+**LaunchAgent, not LaunchDaemon** — the agent needs the user login context
+(`~/.cursor`, `~/.claude`, `~/.ssh`, user PATH). Consequence: it only runs while
+that user is logged in.
+
+Mapping from the systemd unit:
+
+| systemd | launchd |
+|---------|---------|
+| `Restart=on-failure` | `KeepAlive={SuccessfulExit:false}` |
+| `RestartSec=5` | `ThrottleInterval=5` |
+| `TimeoutStopSec=620` | `ExitTimeOut=620` (still > `SHUTDOWN_GRACE_SEC=600`) |
+| `EnvironmentFile=.env` | **no equivalent** → `scripts/launchd-exec.sh` sources `.env`, then execs `uv` |
+| `MemoryMax=6G` / `MemoryHigh` | **no equivalent** (no cgroups) — unbounded |
+| `zenbot-rebuild.path` | `WatchPaths` on `data/REQUEST_REBUILD` |
+| `journalctl -u` | `data/logs/launchd.{out,err}.log` |
+
+`scripts/deploy.sh` is now shared: it picks systemd vs launchd from `uname`
+(override `ZENBOT_INIT`), and **skips when the flag file is absent** — launchd
+`WatchPaths` also fires on the flag's *deletion*, which would otherwise restart
+the gateway twice. Test it safely with `ZENBOT_DRY_RUN=1`; force a restart with
+no flag via `ZENBOT_FORCE_RESTART=1`.
 
 ## Code map
 
@@ -190,6 +221,10 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 - ~~Passwordless **sudoers** allowlist~~ ✅ — `deploy/sudoers/zenbot-ops` installed to `/etc/sudoers.d/`; zenbot systemctl verbs + daemon-reload passwordless, all other sudo → modal; never allowlist maxi-writable scripts
 - Telegram inline approve (after Discord v1)
 - **Not building:** full Discord terminal / reverse shell
+
+**P4 — wanted later**
+
+- **claude-sdk backend** — Claude Agent SDK in-process; headline: custom tools (Karakeep/Obsidian/MusicGrabber as native tools); claude-cli stays default; see ROADMAP build order #19
 
 **Out of scope / defer**
 

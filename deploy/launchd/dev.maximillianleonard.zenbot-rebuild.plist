@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Rebuild watcher (macOS equivalent of zenbot-rebuild.path + .service).
+  WatchPaths fires when data/REQUEST_REBUILD appears; deploy.sh restarts the
+  agent via launchctl kickstart. Template filled by install-launchd-service.sh.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>@REBUILD_LABEL@</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>@ROOT@/scripts/deploy.sh</string>
+  </array>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>@ROOT@/data/REQUEST_REBUILD</string>
+  </array>
+
+  <!-- Only run when the flag changes, never at load. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>@HOME@</string>
+    <key>PATH</key>
+    <string>@PATH_VALUE@</string>
+    <key>ZENBOT_DATA_DIR</key>
+    <string>@ROOT@/data</string>
+    <key>ZENBOT_REBUILD_DELAY_SEC</key>
+    <string>15</string>
+    <key>ZENBOT_INIT</key>
+    <string>launchd</string>
+    <key>ZENBOT_LAUNCHD_LABEL</key>
+    <string>@LABEL@</string>
+  </dict>
+
+  <key>Nice</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>@ROOT@/data/logs/launchd-rebuild.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>@ROOT@/data/logs/launchd-rebuild.err.log</string>
+</dict>
+</plist>

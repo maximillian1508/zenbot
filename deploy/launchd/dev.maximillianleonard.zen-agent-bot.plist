@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  zen-agent-bot LaunchAgent (macOS equivalent of deploy/systemd/zen-agent-bot.service).
+  Template: placeholder tokens are filled in by scripts/install-launchd-service.sh.
+  A LaunchAgent (not LaunchDaemon) because the gateway needs the user's login
+  context: ~/.cursor and ~/.claude credentials, ~/.ssh keys, user PATH.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>@LABEL@</string>
+
+  <!-- Wrapper sources .env first: launchd has no EnvironmentFile= -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>@ROOT@/scripts/launchd-exec.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>@ROOT@</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>@HOME@</string>
+    <key>PATH</key>
+    <string>@PATH_VALUE@</string>
+    <key>ZEN_AGENT_DATA_DIR</key>
+    <string>@ROOT@/data</string>
+    <key>AGENT_WORKSPACE</key>
+    <string>@WORKSPACE@</string>
+    <!-- Wait for in-flight agent jobs on stop/restart (must be < ExitTimeOut). -->
+    <key>SHUTDOWN_GRACE_SEC</key>
+    <string>600</string>
+    <key>ZENBOT_UV_BIN</key>
+    <string>@UV_BIN@</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Restart=on-failure: relaunch on non-zero exit, not on clean stop. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <!-- RestartSec=5 -->
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+
+  <!-- TimeoutStopSec=620: SIGTERM -> (grace) -> SIGKILL. Must exceed
+       SHUTDOWN_GRACE_SEC so the gateway can drain in-flight jobs. -->
+  <key>ExitTimeOut</key>
+  <integer>620</integer>
+
+  <!-- Adaptive avoids the hard CPU/IO throttling that ProcessType=Background
+       applies; the gateway must stay responsive to Discord. -->
+  <key>ProcessType</key>
+  <string>Adaptive</string>
+
+  <key>StandardOutPath</key>
+  <string>@ROOT@/data/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>@ROOT@/data/logs/launchd.err.log</string>
+</dict>
+</plist>
