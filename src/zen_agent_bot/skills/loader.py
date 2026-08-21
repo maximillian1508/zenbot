@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..outbound import limits_from_env
+
 _SKILL_FILE = "SKILL.md"
 
 
@@ -83,11 +85,20 @@ def build_prompt(
     user_message: str,
     model: str | None = None,
     project_root: Path | None = None,
+    attach_hint: bool = True,
 ) -> str:
     model_bit = f" | Model: {model}" if model else ""
     parts: list[str] = [
         f"[Agent: {agent_id} ({display_name}) | Backend: {backend}{model_bit} | Workspace: {workspace}]",
     ]
+    if attach_hint:
+        max_bytes, max_files = limits_from_env()
+        parts.append(
+            "[Attachments: to show the user a file (screenshot, chart, export), put "
+            f"`[[attach: /absolute/path]]` in your reply — up to {max_files} files, "
+            f"{max_bytes // (1024 * 1024)} MiB each. The marker is replaced by the "
+            "upload, so describe the file in words too.]"
+        )
     if system_prompt:
         parts.extend(["", "--- System ---", system_prompt, "---"])
     if skill_paths:

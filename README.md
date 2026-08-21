@@ -80,6 +80,7 @@ uv run zen-agent-bot
 | **New task** | Post in `#agent` / `#music-agent` / `#general-agent`, or `/music` `/general` `/manager` → bot opens a **thread** in that home |
 | **Follow-up** | Reply in the same thread (`--resume`). If a job is running, your message is **queued** — **Send now** stops the current job and runs this one (Cursor Stop & send). **Drop** unqueues it |
 | **Attach files** | Drop images/docs in the thread (or with your message) — saved under `data/attachments/` and paths go into the prompt |
+| **Get files back** | The agent replies with `[[attach: /abs/path]]` and the file is uploaded into the thread (screenshots, charts, exports). Max 10 files, 8 MiB each — `OUTBOUND_MAX_FILES` / `OUTBOUND_MAX_BYTES` to change. Only paths under the workspace, `data/`, or a temp dir; obvious secrets (`.env`, `.ssh/`, `*.pem`) are refused. Discord only for now |
 | **Fresh session** | `/new` in the thread (keeps `/model` and `/backend` overrides) |
 | **Close session** | `/close` — archive Discord thread, keep `--resume`; admin **Sessions → Clear** forgets the mapping |
 | **Model** | `/model` lists Cursor CLI models · `/model composer-2.5` this thread · `/model clear` |

@@ -38,6 +38,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 DISCORD_CHUNK = 1900
+# Discord allows 10 attachments per message.
+DISCORD_MAX_FILES = 10
 
 
 def allowlist_mentions(user_ids: list[int]) -> str | None:
@@ -378,6 +380,27 @@ async def send_chunks_reply(status_msg: discord.Message, text: str) -> None:
     while start < len(text):
         await status_msg.reply(text[start : start + DISCORD_CHUNK], mention_author=False)
         start += DISCORD_CHUNK
+
+
+async def send_files_reply(
+    status_msg: discord.Message,
+    paths: list[Path],
+    *,
+    per_message: int = DISCORD_MAX_FILES,
+) -> None:
+    """Upload files as replies to the job's status message.
+
+    Batched because Discord caps attachments per message. Files are opened
+    lazily per batch so a long list does not hold every descriptor at once.
+    """
+    for start in range(0, len(paths), per_message):
+        batch = paths[start : start + per_message]
+        handles = [discord.File(str(path), filename=path.name) for path in batch]
+        try:
+            await status_msg.reply(files=handles, mention_author=False)
+        finally:
+            for handle in handles:
+                handle.close()
 
 
 _AGENT_PAREN_ID = re.compile(r"\(([^)]+)\)\s*$")
@@ -857,6 +880,14 @@ class AgentDiscordBot(discord.Client):
                 kwargs["view"] = view
             await _status.edit(**kwargs)
 
+        async def send_files(
+            paths: list[Path],
+            _session_key: str,
+            *,
+            _status: discord.Message = status_msg,
+        ) -> None:
+            await send_files_reply(_status, paths)
+
         async def on_queued(job_id: str, *, _status: discord.Message = status_msg) -> None:
             qview = QueueJobView(self.gateway, sess_key, job_id)
             await _status.edit(view=qview)
@@ -872,6 +903,7 @@ class AgentDiscordBot(discord.Client):
                 user_prompt=prompt,
                 send=send,
                 edit_status=edit_status,
+                send_files=send_files,
                 on_queued=on_queued,
                 notify_mention=mention,
                 schedule_id=schedule_id,

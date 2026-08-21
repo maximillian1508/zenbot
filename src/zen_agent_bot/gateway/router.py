@@ -34,6 +34,12 @@ from ..model_select import (
     resolve_model,
 )
 from ..notify import append_status_line, format_job_done_ping, should_ping_done
+from ..outbound import (
+    describe_unsupported,
+    extract_outbound,
+    format_notes,
+    limits_from_env,
+)
 from ..schedule import format_schedules_markdown
 from ..sessions import SessionStore, ThreadSession
 from ..skills.loader import build_prompt
@@ -68,6 +74,8 @@ class JobResult:
 
 SendText = Callable[[str], Awaitable[None]]
 EditText = Callable[..., Awaitable[None]]
+# Upload files for a finished job; None when the transport cannot upload.
+SendFiles = Callable[[list[Path], str], Awaitable[None]]
 _STOP = object()
 
 
@@ -79,6 +87,7 @@ class _QueuedJob:
     user_prompt: str
     send: SendText
     edit_status: EditText
+    send_files: SendFiles | None = None
     ready: bool = True
     notify_mention: str | None = None
     schedule_id: str | None = None
@@ -294,6 +303,24 @@ class Gateway:
             attach_view=attach,
         )
 
+    def _outbound_roots(self, workspace: Path) -> tuple[Path, ...]:
+        """Directories an agent may attach files from.
+
+        The workspace already covers normal work; data/ holds generated output
+        and temp dirs cover scratch screenshots. Anything else fails closed.
+        """
+        roots = [workspace, self.config.data_dir, Path("/tmp")]
+        tmpdir = os.environ.get("TMPDIR")
+        if tmpdir:
+            roots.append(Path(tmpdir))
+        out: list[Path] = []
+        for root in roots:
+            try:
+                out.append(root.expanduser().resolve())
+            except (OSError, RuntimeError):
+                continue
+        return tuple(dict.fromkeys(out))
+
     def session_key(self, agent_id: str, transport: str, channel_id: str | int) -> str:
         return f"{agent_id}:{transport}:{channel_id}"
 
@@ -380,6 +407,7 @@ class Gateway:
         user_prompt: str,
         send: SendText,
         edit_status: EditText,
+        send_files: SendFiles | None = None,
         on_queued: Callable[[str], Awaitable[None]] | None = None,
         notify_mention: str | None = None,
         schedule_id: str | None = None,
@@ -400,6 +428,7 @@ class Gateway:
             user_prompt=user_prompt,
             send=send,
             edit_status=edit_status,
+            send_files=send_files,
             notify_mention=notify_mention,
             schedule_id=schedule_id,
             on_done=on_done,
@@ -844,6 +873,21 @@ class Gateway:
         if result.error and result.exit_code != 0:
             body += f"\n\n```\n{result.error[:1500]}\n```"
 
+        # `[[attach: path]]` markers -> real uploads. Always strips the markers,
+        # even when a file is rejected, so the reply never shows plumbing.
+        max_bytes, max_files = limits_from_env()
+        outbound = extract_outbound(
+            body,
+            allowed_roots=self._outbound_roots(workspace),
+            max_bytes=max_bytes,
+            max_files=max_files,
+        )
+        body = outbound.text
+        if outbound.notes:
+            body = f"{body}\n\n{format_notes(outbound.notes)}".strip()
+        if outbound.files and job.send_files is None:
+            body = f"{body}\n\n{describe_unsupported(outbound.files)}".strip()
+
         display = body[:8000] if len(body) > 8000 else body
         # Finish on the same status message that streamed progress (Discord ≤2k).
         # Overflow only → send(), which transports attach to that status.
@@ -856,6 +900,21 @@ class Gateway:
             await job.send(display)
             if len(body) > 8000:
                 await job.send(f"_(truncated — full output was {len(body)} chars)_")
+
+        if outbound.files and job.send_files is not None:
+            try:
+                await job.send_files(
+                    [f.path for f in outbound.files], job.session_key
+                )
+            except Exception:
+                log.exception("Failed to upload attachments for %s", job.session_key)
+                try:
+                    await job.send(
+                        "⚠️ Could not upload the attachment(s):\n"
+                        + describe_unsupported(outbound.files)
+                    )
+                except Exception:
+                    log.exception("Failed to report attachment upload failure")
 
         title = sess.title or title_from_prompt(job.user_prompt)
         self.store.set(

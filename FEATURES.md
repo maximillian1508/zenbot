@@ -48,6 +48,7 @@ Compares **zen-agent-bot** (ours) vs reference stacks. Status updated **2026-08-
 | Streaming replies | ✅ | — | **done** | Discord status edit |
 | Telegram transport | ⚠️ coded | 🟢 | **P1 ★** | Enable second profile tokens |
 | File attachments | ✅ | — | **done** | Discord/TG → `data/attachments/`; paths in prompt (25 MiB / 10) |
+| Outbound attachments | ✅ | — | **done** | Agent reply `[[attach: path]]` → Discord upload; root allowlist + secret denylist; 10 files / 8 MiB (env-tunable); Telegram lists paths |
 | Per-thread `/backend` | ✅ | — | **done** | Same session row as `/model`; resume cleared on switch |
 | **Model selection** | ✅ | — | **done** | Admin fields + `/model` in thread; live apply |
 | Job queue + `/cancel` | ✅ | — | **done** | Graceful shutdown + `/rebuild` too |

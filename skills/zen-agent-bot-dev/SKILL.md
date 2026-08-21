@@ -38,6 +38,7 @@ Discord/Telegram → transports → Gateway (queue + sessions) → backends (cur
 - **Sessions** = per thread key → Cursor `--resume` session_id
 - **Per-thread queue** = follow-ups while busy auto-run next (same thread)
 - **Streaming** = `agent --output-format stream-json` → edits Discord status live (`STREAMING=false` to disable)
+- **Outbound files** = agent writes `[[attach: /abs/path]]` in its reply → `outbound.py` validates (root allowlist, secret denylist, 10 files / 8 MiB) → transport `send_files` uploads. Discord done; Telegram lists paths instead
 
 ## Config split
 
@@ -119,6 +120,7 @@ no flag via `ZENBOT_FORCE_RESTART=1`.
 | Admin UI | `src/zen_agent_bot/web/app.py` (`/status` live jobs) |
 | Cursor / Claude / OpenRouter | `src/zen_agent_bot/backends/` |
 | Prompt build | `src/zen_agent_bot/skills/loader.py` |
+| Outbound attachments | `src/zen_agent_bot/outbound.py` |
 
 ## Git commits (mandatory)
 
