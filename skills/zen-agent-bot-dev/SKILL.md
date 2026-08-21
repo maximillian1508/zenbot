@@ -183,8 +183,8 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 
 **P3 — interactive control plane (2026-08-20)**
 
-- ~~SDK approval bridge → Discord **Accept / Deny** on pending tools~~ ✅ — hooks + `/trust approve` + cursor-sdk
-- Secure prompt via Discord **modal** for sudo/secrets (ephemeral, no SQLite/logs/channel text)
+- ~~SDK approval bridge → Discord **Accept / Deny** on pending tools~~ ✅ — hooks + `/trust approve` + cursor-sdk (opt-in; default is force everywhere)
+- ~~Secure prompt via Discord **modal** for sudo~~ ✅ — `SUDO_ASKPASS` + PATH shim (`scripts/sudo-shim/`, `scripts/sudo-askpass.py`) → `/internal/sudo` → Enter-password modal; all backends; password never logged/stored
 - ~~Per-thread **`/trust`**~~ ✅ — `force` | `approve` (admin default still later)
 - Passwordless **sudoers** allowlist for known deploy ops (complements modal)
 - Telegram inline approve (after Discord v1)

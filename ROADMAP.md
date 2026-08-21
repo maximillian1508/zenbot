@@ -140,12 +140,12 @@ Recommendation: default backend **`cursor-cli`** for zenbook work (music import,
 |---|---------|--------|-------|
 | 3.1 | **SDK approval bridge** | ✅ | Hooks wait on Discord; `/internal/approvals` + token file |
 | 3.2 | **Discord Accept / Deny** | ✅ | Status-bubble Accept/Deny for trust=`approve` shell/MCP |
-| 3.3 | **Secure prompt (modal)** | 🟡 2–3d | SDK “needs input” (sudo password, confirm) → Discord modal, ephemeral, ~60s TTL; never log or store |
+| 3.3 | **Secure prompt (modal)** | ✅ 2026-08-21 | `SUDO_ASKPASS` + PATH shim force `sudo -A` in all agent jobs → `/internal/sudo` → Discord **Enter password** modal (180s TTL); password loopback-only, never logged/stored. Works on every backend, both trust modes |
 | 3.4 | **Per-thread `/trust` or admin default** | ✅ | `/trust force\|approve`; default `force`; SDK `autoReview` when approve |
 | 3.5 | **Passwordless sudo allowlist** | 🟢 0.5d | Document + expand `sudoers` for known ops (`systemctl restart zen-agent-bot`, deploy scripts) — complements 3.3 |
 | 3.6 | **Telegram inline approve** | 🟡 1d | Same gateway actions as Discord buttons |
 
-**Default routing:** keep **`cursor-cli` + `--force`** for unattended server work. Use **`cursor-sdk` + approve mode** in threads where you want phone-gated ops.
+**Default routing (decided 2026-08-21):** **auto-approve everywhere** (`force` on all backends); the only interactive gate is **sudo** → Discord password modal. `/trust approve` (per-command Accept/Deny on cursor-sdk) stays as an opt-in for rare cautious runs — nothing defaults to it.
 
 **Security rules (locked):**
 

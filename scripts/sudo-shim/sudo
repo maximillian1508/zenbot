@@ -1,0 +1,4 @@
+#!/bin/sh
+# zen-agent-bot shim: force sudo to use SUDO_ASKPASS (Discord password modal)
+# instead of failing with "no tty present". Installed on PATH for agent jobs.
+exec /usr/bin/sudo -A "$@"

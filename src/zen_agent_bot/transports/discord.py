@@ -277,6 +277,83 @@ class ApproveDenyView(discord.ui.View):
         await self._decide(interaction, allow=False)
 
 
+class SudoPasswordModal(discord.ui.Modal, title="sudo password"):
+    """Ephemeral password entry for a blocked sudo command.
+
+    The value goes straight to the waiting askpass helper — it is never
+    stored, logged, or posted to the channel.
+    """
+
+    password: discord.ui.TextInput[Any] = discord.ui.TextInput(
+        label="Password (sent privately to sudo)",
+        style=discord.TextStyle.short,
+        required=True,
+        max_length=256,
+    )
+
+    def __init__(self, gateway: Gateway, sudo_id: str) -> None:
+        super().__init__(timeout=170)
+        self.gateway = gateway
+        self.sudo_id = sudo_id
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        ok = self.gateway.approvals.resolve_sudo(
+            self.sudo_id,
+            password=str(self.password.value),
+            reason=f"discord:{interaction.user.id}",
+        )
+        if ok:
+            await interaction.response.send_message(
+                "🔐 Password sent to sudo — continuing.", ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "Prompt already resolved or expired.", ephemeral=True
+            )
+
+
+class SudoPromptView(discord.ui.View):
+    """Enter password / Deny for a pending sudo askpass request."""
+
+    def __init__(self, gateway: Gateway, session_key: str, sudo_id: str) -> None:
+        super().__init__(timeout=None)
+        self.gateway = gateway
+        self.session_key = session_key
+        self.sudo_id = sudo_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user and self.gateway.is_allowed(interaction.user.id):
+            return True
+        if interaction.response.is_done():
+            await interaction.followup.send("Not authorized.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Not authorized.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Enter password", style=discord.ButtonStyle.primary)
+    async def enter(
+        self, interaction: discord.Interaction, button: discord.ui.Button[Any]
+    ) -> None:
+        await interaction.response.send_modal(
+            SudoPasswordModal(self.gateway, self.sudo_id)
+        )
+
+    @discord.ui.button(label="Deny", style=discord.ButtonStyle.danger)
+    async def deny(
+        self, interaction: discord.Interaction, button: discord.ui.Button[Any]
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        self.gateway.approvals.resolve_sudo(
+            self.sudo_id, password=None, reason=f"discord:{interaction.user.id}"
+        )
+        await interaction.followup.send("Denied — sudo will fail.", ephemeral=True)
+        try:
+            await interaction.message.edit(view=None)
+        except discord.HTTPException:
+            pass
+        self.stop()
+
+
 async def send_chunks(target: Messageable, text: str) -> None:
     if len(text) <= DISCORD_CHUNK:
         await target.send(text)
@@ -1512,6 +1589,9 @@ async def run_discord_bots(
         lambda session_key, approval_id: ApproveDenyView(
             gateway, session_key, approval_id
         )
+    )
+    gateway.set_sudo_view_factory(
+        lambda session_key, sudo_id: SudoPromptView(gateway, session_key, sudo_id)
     )
 
     tasks: list[asyncio.Task[None]] = []

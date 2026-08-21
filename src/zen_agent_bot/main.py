@@ -28,6 +28,23 @@ def _write_approval_token(data_dir: Path, token: str) -> None:
     log.info("Wrote Discord approval token to %s", path)
 
 
+def _install_sudo_askpass_env() -> None:
+    """Point child processes (agent CLI, SDK bridge, claude) at the Discord
+    sudo prompt: a PATH shim forces `sudo -A`, and SUDO_ASKPASS blocks on the
+    gateway's /internal/sudo modal flow."""
+    scripts = Path(__file__).resolve().parents[2] / "scripts"
+    askpass = scripts / "sudo-askpass.py"
+    shim_dir = scripts / "sudo-shim"
+    if not askpass.is_file() or not (shim_dir / "sudo").is_file():
+        log.warning("sudo askpass helpers missing under %s — sudo prompts disabled", scripts)
+        return
+    os.environ["SUDO_ASKPASS"] = str(askpass)
+    path = os.environ.get("PATH", "")
+    if str(shim_dir) not in path.split(":"):
+        os.environ["PATH"] = f"{shim_dir}:{path}"
+    log.info("sudo askpass bridge enabled (%s)", askpass)
+
+
 async def run_admin_server(
     db: ConfigStore,
     listen: str,
@@ -78,6 +95,7 @@ async def run_gateway() -> None:
     config = load_config()
     gateway = Gateway(config)
     _write_approval_token(config.data_dir, gateway.approvals.token)
+    _install_sudo_askpass_env()
 
     has_discord = bool(config.agents.discord_agents())
     has_telegram = bool(config.agents.telegram_agents())

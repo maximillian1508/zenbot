@@ -234,6 +234,7 @@ class Gateway:
         self.scheduler: Any = None
         self.approvals = ApprovalBridge()
         self._approval_view_factory: Callable[[str, str], object] | None = None
+        self._sudo_view_factory: Callable[[str, str], object] | None = None
 
     def set_approval_view_factory(
         self, factory: Callable[[str, str], object] | None
@@ -260,6 +261,31 @@ class Gateway:
             kind=kind,
             summary=summary,
             detail=detail,
+            timeout_sec=timeout_sec,
+            attach_view=attach,
+        )
+
+    def set_sudo_view_factory(
+        self, factory: Callable[[str, str], object] | None
+    ) -> None:
+        """factory(session_key, sudo_id) -> discord.ui.View"""
+        self._sudo_view_factory = factory
+
+    async def request_sudo_password(
+        self,
+        *,
+        session_key: str,
+        prompt: str,
+        timeout_sec: float = 180.0,
+    ) -> str | None:
+        def attach(sudo_id: str) -> object | None:
+            if self._sudo_view_factory is None:
+                return None
+            return self._sudo_view_factory(session_key, sudo_id)
+
+        return await self.approvals.request_sudo(
+            session_key=session_key,
+            prompt=prompt,
             timeout_sec=timeout_sec,
             attach_view=attach,
         )
@@ -665,15 +691,17 @@ class Gateway:
             project_root=self.config.project_root,
         )
 
-        if trust.mode == "approve" and backend_name == "cursor-sdk":
-            self.approvals.bind_job(
-                session_key=job.session_key,
-                workspace=workspace,
-                edit_status=job.edit_status,
-                display_name=profile.display_name,
-                running_view=job.running_view,
-                cancel_event=run_handle.cancel_event,
-            )
+        # Bind every job so sudo askpass prompts can route to its thread;
+        # per-command Accept/Deny stays opt-in via trust=approve on cursor-sdk.
+        self.approvals.bind_job(
+            session_key=job.session_key,
+            workspace=workspace,
+            edit_status=job.edit_status,
+            display_name=profile.display_name,
+            running_view=job.running_view,
+            cancel_event=run_handle.cancel_event,
+            approve_tools=(trust.mode == "approve" and backend_name == "cursor-sdk"),
+        )
 
         async with self._global_sem:
             progress = (
@@ -735,8 +763,7 @@ class Gateway:
                 if progress:
                     if not self.approvals.is_awaiting(job.session_key):
                         await progress.flush()
-                if trust.mode == "approve" and backend_name == "cursor-sdk":
-                    self.approvals.unbind_job(job.session_key)
+                self.approvals.unbind_job(job.session_key)
 
         if result.error == "cancelled":
             # Prefer last streamed Discord/Telegram status over backend stub text.

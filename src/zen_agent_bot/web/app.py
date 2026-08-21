@@ -1485,6 +1485,9 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
                 {"permission": "deny", "reason": "no active approve-mode job"},
                 status_code=409,
             )
+        if not gateway.approvals.approve_tools_enabled(resolved):
+            # Job is bound (for sudo routing) but trust is force — auto-allow.
+            return JSONResponse({"permission": "allow", "session_key": resolved})
         allowed = await gateway.request_tool_approval(
             session_key=resolved,
             kind=kind,
@@ -1498,6 +1501,43 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
                 "session_key": resolved,
             }
         )
+
+    @app.post("/internal/sudo")
+    async def internal_sudo_request(request: Request) -> JSONResponse:
+        """Askpass endpoint: block until the user submits a password via modal.
+
+        The password is returned to the local askpass helper only and is never
+        logged or persisted.
+        """
+        _check_approval_token(request)
+        assert gateway is not None
+        try:
+            payload = await request.json()
+        except Exception as exc:
+            raise HTTPException(400, "invalid json") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(400, "expected object")
+        prompt = str(payload.get("prompt") or "sudo password")
+        cwd = payload.get("cwd")
+        session_key = payload.get("session_key")
+        timeout_sec = float(payload.get("timeout_sec") or 180)
+        resolved = gateway.approvals.resolve_session_key(
+            session_key=str(session_key) if session_key else None,
+            cwd=str(cwd) if cwd else None,
+        )
+        if not resolved:
+            return JSONResponse(
+                {"denied": True, "reason": "no active job for this cwd"},
+                status_code=409,
+            )
+        password = await gateway.request_sudo_password(
+            session_key=resolved,
+            prompt=prompt,
+            timeout_sec=timeout_sec,
+        )
+        if password is None:
+            return JSONResponse({"denied": True}, status_code=403)
+        return JSONResponse({"password": password})
 
     @app.get("/internal/approvals/pending")
     async def internal_approval_pending(request: Request) -> JSONResponse:

@@ -164,6 +164,94 @@ class ApprovalBridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("streaming", restore[-1][0])
             bridge.unbind_job("s1")
 
+    async def test_sudo_fulfilled_returns_password(self) -> None:
+        bridge = ApprovalBridge()
+        edits: list[tuple[str, dict[str, object]]] = []
+
+        async def edit(text: str, **kwargs: object) -> None:
+            edits.append((text, kwargs))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge.bind_job(
+                session_key="s1",
+                workspace=Path(tmp),
+                edit_status=edit,
+                display_name="Manager",
+                running_view="cancel-view",
+            )
+            task = asyncio.create_task(
+                bridge.request_sudo(
+                    session_key="s1",
+                    prompt="[sudo] password for maxi:",
+                    timeout_sec=2,
+                )
+            )
+            await asyncio.sleep(0.05)
+            self.assertTrue(bridge.is_awaiting("s1"))
+            self.assertTrue(any("sudo needs your password" in e[0] for e in edits))
+            sudo_id = bridge._sudo_by_session["s1"]
+            ok = bridge.resolve_sudo(sudo_id, password="hunter2", reason="test")
+            self.assertTrue(ok)
+            self.assertEqual(await task, "hunter2")
+            # Password must never appear in any status edit.
+            self.assertFalse(any("hunter2" in e[0] for e in edits))
+            # Running view restored after the prompt resolved.
+            self.assertEqual(edits[-1][1].get("view"), "cancel-view")
+            bridge.unbind_job("s1")
+
+    async def test_sudo_denied_and_timeout_return_none(self) -> None:
+        bridge = ApprovalBridge()
+
+        async def edit(text: str, **kwargs: object) -> None:
+            return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge.bind_job(
+                session_key="s1",
+                workspace=Path(tmp),
+                edit_status=edit,
+                display_name="Manager",
+            )
+            task = asyncio.create_task(
+                bridge.request_sudo(session_key="s1", prompt="sudo", timeout_sec=2)
+            )
+            await asyncio.sleep(0.05)
+            sudo_id = bridge._sudo_by_session["s1"]
+            bridge.resolve_sudo(sudo_id, password=None, reason="test-deny")
+            self.assertIsNone(await task)
+            # Timeout path.
+            result = await bridge.request_sudo(
+                session_key="s1", prompt="sudo", timeout_sec=0.1
+            )
+            self.assertIsNone(result)
+            bridge.unbind_job("s1")
+
+    async def test_approve_tools_flag_gates_tool_approvals(self) -> None:
+        bridge = ApprovalBridge()
+
+        async def edit(text: str, **kwargs: object) -> None:
+            return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge.bind_job(
+                session_key="force-job",
+                workspace=Path(tmp),
+                edit_status=edit,
+                display_name="Manager",
+                approve_tools=False,
+            )
+            self.assertFalse(bridge.approve_tools_enabled("force-job"))
+            bridge.bind_job(
+                session_key="force-job",
+                workspace=Path(tmp),
+                edit_status=edit,
+                display_name="Manager",
+                approve_tools=True,
+            )
+            self.assertTrue(bridge.approve_tools_enabled("force-job"))
+            self.assertFalse(bridge.approve_tools_enabled("unknown"))
+            bridge.unbind_job("force-job")
+
     async def test_superseded_request_keeps_new_prompt(self) -> None:
         """Request B replacing A must not have A's cleanup stomp B's prompt."""
         bridge = ApprovalBridge()

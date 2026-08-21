@@ -38,6 +38,16 @@ class PendingApproval:
 
 
 @dataclass
+class PendingSudo:
+    id: str
+    session_key: str
+    prompt: str
+    created_at: float = field(default_factory=time.time)
+    # Result is the password (str) or None for deny/timeout. Never logged.
+    future: asyncio.Future[str | None] = field(default=None)  # type: ignore[assignment]
+
+
+@dataclass
 class ApprovalJobContext:
     session_key: str
     workspace: Path
@@ -49,6 +59,7 @@ class ApprovalJobContext:
     cancelled: bool = False
     awaiting_approval: bool = False
     cancel_event: asyncio.Event | None = None
+    approve_tools: bool = False
 
 
 class ApprovalBridge:
@@ -58,6 +69,8 @@ class ApprovalBridge:
         self._lock = asyncio.Lock()
         self._pending: dict[str, PendingApproval] = {}
         self._by_session: dict[str, str] = {}
+        self._sudo: dict[str, PendingSudo] = {}
+        self._sudo_by_session: dict[str, str] = {}
         self._jobs: dict[str, ApprovalJobContext] = {}
         self._cwd_index: dict[str, str] = {}
         self._token = secrets.token_urlsafe(24)
@@ -75,6 +88,7 @@ class ApprovalBridge:
         display_name: str,
         running_view: object | None = None,
         cancel_event: asyncio.Event | None = None,
+        approve_tools: bool = False,
     ) -> None:
         cwd = str(workspace.resolve())
         self._jobs[session_key] = ApprovalJobContext(
@@ -84,8 +98,13 @@ class ApprovalBridge:
             display_name=display_name,
             running_view=running_view,
             cancel_event=cancel_event,
+            approve_tools=approve_tools,
         )
         self._cwd_index[cwd] = session_key
+
+    def approve_tools_enabled(self, session_key: str) -> bool:
+        job = self._jobs.get(session_key)
+        return bool(job and job.approve_tools)
 
     def unbind_job(self, session_key: str) -> None:
         job = self._jobs.pop(session_key, None)
@@ -97,6 +116,11 @@ class ApprovalBridge:
             pending = self._pending.pop(aid)
             if not pending.future.done():
                 pending.future.set_result(False)
+        sid = self._sudo_by_session.pop(session_key, None)
+        if sid and sid in self._sudo:
+            sudo = self._sudo.pop(sid)
+            if not sudo.future.done():
+                sudo.future.set_result(None)
 
     def cancel_job(self, session_key: str, *, reason: str = "stopped") -> None:
         """Deny pending approval and suppress post-approval status restore."""
@@ -106,6 +130,9 @@ class ApprovalBridge:
         aid = self._by_session.get(session_key)
         if aid:
             self.resolve(aid, allow=False, reason=reason)
+        sid = self._sudo_by_session.get(session_key)
+        if sid:
+            self.resolve_sudo(sid, password=None, reason=reason)
 
     def has_pending(self, session_key: str) -> bool:
         aid = self._by_session.get(session_key)
@@ -274,6 +301,120 @@ class ApprovalBridge:
             "Approval %s %s (%s)",
             approval_id,
             "accepted" if allow else "denied",
+            reason or "user",
+        )
+        return True
+
+    async def request_sudo(
+        self,
+        *,
+        session_key: str,
+        prompt: str,
+        timeout_sec: float = 180.0,
+        attach_view: Callable[[str], object] | None = None,
+    ) -> str | None:
+        """Show a sudo password prompt on the job's status bubble.
+
+        Returns the password, or None on deny/timeout/cancel. The password is
+        held in memory only — never logged or persisted.
+        """
+        job = self._jobs.get(session_key)
+        if job is None:
+            log.warning("Sudo request with no active job for %s", session_key)
+            return None
+
+        sudo_id = secrets.token_hex(8)
+        loop = asyncio.get_running_loop()
+        pending = PendingSudo(
+            id=sudo_id,
+            session_key=session_key,
+            prompt=prompt.strip()[:180] or "sudo",
+            future=loop.create_future(),
+        )
+        async with self._lock:
+            old = self._sudo_by_session.get(session_key)
+            if old and old in self._sudo:
+                prev = self._sudo.pop(old)
+                if not prev.future.done():
+                    prev.future.set_result(None)
+            self._sudo[sudo_id] = pending
+            self._sudo_by_session[session_key] = sudo_id
+
+        body = (
+            f"🔐 **sudo needs your password** · {job.display_name}\n"
+            f"`{pending.prompt}`\n"
+            f"_Tap **Enter password** within {int(timeout_sec)}s "
+            "(or Deny to fail the command)_"
+        )
+        existing = (job.progress_text or "").strip()
+        status = f"{existing}\n\n———\n{body}" if existing else body
+        view = attach_view(sudo_id) if attach_view else None
+        job.awaiting_approval = True
+        try:
+            await job.edit_status(status[:2000], view=view)
+        except Exception:
+            log.exception("Failed to show sudo prompt for %s", session_key)
+
+        waiters: set[asyncio.Task[Any]] = {
+            asyncio.create_task(self._await_sudo_future(pending.future))
+        }
+        cancel_event = job.cancel_event
+        if cancel_event is not None:
+            waiters.add(asyncio.create_task(cancel_event.wait()))
+        try:
+            done, _pending_tasks = await asyncio.wait(
+                waiters,
+                timeout=timeout_sec,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                self.resolve_sudo(sudo_id, password=None, reason="timeout")
+                return None
+            if cancel_event is not None and cancel_event.is_set():
+                job.cancelled = True
+                self.resolve_sudo(sudo_id, password=None, reason="cancelled")
+                return None
+            if pending.future.done():
+                return pending.future.result()
+            self.resolve_sudo(sudo_id, password=None, reason="timeout")
+            return None
+        finally:
+            for task in waiters:
+                if not task.done():
+                    task.cancel()
+            for task in waiters:
+                with suppress(asyncio.CancelledError):
+                    await task
+            async with self._lock:
+                self._sudo.pop(sudo_id, None)
+                is_current = self._sudo_by_session.get(session_key) == sudo_id
+                if is_current:
+                    self._sudo_by_session.pop(session_key, None)
+            if is_current:
+                job.awaiting_approval = False
+                if not job.cancelled and not (
+                    job.cancel_event is not None and job.cancel_event.is_set()
+                ):
+                    await self._restore_running_status(job)
+
+    @staticmethod
+    async def _await_sudo_future(future: asyncio.Future[str | None]) -> str | None:
+        return await asyncio.shield(future)
+
+    def resolve_sudo(
+        self, sudo_id: str, *, password: str | None, reason: str = ""
+    ) -> bool:
+        pending = self._sudo.get(sudo_id)
+        if pending is None:
+            return False
+        if pending.future.done():
+            return False
+        pending.future.set_result(password)
+        # Log outcome only — never the password itself.
+        log.info(
+            "Sudo prompt %s %s (%s)",
+            sudo_id,
+            "fulfilled" if password is not None else "denied",
             reason or "user",
         )
         return True
