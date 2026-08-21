@@ -186,7 +186,7 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 - ~~SDK approval bridge → Discord **Accept / Deny** on pending tools~~ ✅ — hooks + `/trust approve` + cursor-sdk (opt-in; default is force everywhere)
 - ~~Secure prompt via Discord **modal** for sudo~~ ✅ — `SUDO_ASKPASS` + PATH shim (`scripts/sudo-shim/`, `scripts/sudo-askpass.py`) → `/internal/sudo` → Enter-password modal; all backends; password never logged/stored
 - ~~Per-thread **`/trust`**~~ ✅ — `force` | `approve` (admin default still later)
-- Passwordless **sudoers** allowlist for known deploy ops (complements modal)
+- ~~Passwordless **sudoers** allowlist~~ ✅ — `deploy/sudoers/zenbot-ops` installed to `/etc/sudoers.d/`; zenbot systemctl verbs + daemon-reload passwordless, all other sudo → modal; never allowlist maxi-writable scripts
 - Telegram inline approve (after Discord v1)
 - **Not building:** full Discord terminal / reverse shell
 

@@ -1,0 +1,24 @@
+# zen-agent-bot: passwordless sudo for routine gateway ops (P3.5).
+# Install: sudo install -m 0440 -o root -g root deploy/sudoers/zenbot-ops /etc/sudoers.d/zenbot-ops
+# Validate before install: visudo -cf deploy/sudoers/zenbot-ops
+#
+# Scope is deliberately tight: only systemctl verbs on the zenbot units and
+# daemon-reload. Maxi-writable scripts (install-host-service.sh, unit-file
+# copies) are NOT allowlisted — NOPASSWD on a user-writable file would be a
+# silent root escalation and defeat the Discord sudo-password modal.
+# Everything else still prompts via the modal (SUDO_ASKPASS bridge).
+
+maxi ALL=(root) NOPASSWD: \
+    /usr/bin/systemctl start zen-agent-bot, \
+    /usr/bin/systemctl start zen-agent-bot.service, \
+    /usr/bin/systemctl stop zen-agent-bot, \
+    /usr/bin/systemctl stop zen-agent-bot.service, \
+    /usr/bin/systemctl restart zen-agent-bot, \
+    /usr/bin/systemctl restart zen-agent-bot.service, \
+    /usr/bin/systemctl status zen-agent-bot, \
+    /usr/bin/systemctl status zen-agent-bot.service, \
+    /usr/bin/systemctl is-active zen-agent-bot, \
+    /usr/bin/systemctl is-active zen-agent-bot.service, \
+    /usr/bin/systemctl restart zenbot-rebuild.path, \
+    /usr/bin/systemctl status zenbot-rebuild.service, \
+    /usr/bin/systemctl daemon-reload
