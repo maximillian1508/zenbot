@@ -18,6 +18,7 @@ from ..attachments import (
 )
 from ..gateway.router import Gateway
 from ..notify import format_close_reply
+from ..util.rebuild import RebuildNotify, deliver_rebuild_notify_telegram
 
 log = logging.getLogger(__name__)
 
@@ -292,10 +293,18 @@ class TelegramAgentApp:
             await update.message.reply_text("Rebuild already requested — waiting for host.")
             return
         self.gateway.request_rebuild(
-            reason=f"telegram:/rebuild by {update.effective_user.id}"
+            reason=f"telegram:/rebuild by {update.effective_user.id}",
+            notify=RebuildNotify(
+                transport="telegram",
+                channel_id=str(update.effective_chat.id),
+                user_id=str(update.effective_user.id),
+                mention=update.effective_user.first_name or "",
+                agent_id=self.agent_id,
+            ),
         )
         await update.message.reply_text(
-            "Restart requested. Host will systemctl restart in ~15s. Ping after /health is OK."
+            "Restart requested. Host will systemctl restart in ~15s. "
+            "I'll ping you here when /health is OK."
         )
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -389,6 +398,9 @@ async def run_telegram_bots(
         apps.append(app)
         if apps_out is not None:
             apps_out.append(app)
+        await deliver_rebuild_notify_telegram(
+            app, agent_id=profile.id, data_dir=gateway.config.data_dir
+        )
         log.info("Telegram polling started for %s", profile.display_name)
 
     try:

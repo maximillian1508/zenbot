@@ -31,6 +31,11 @@ def append_status_line(status: str, line: str, *, limit: int = 1900) -> str:
     return body[:room].rstrip() + "\n\n_(…)_" + footer
 
 
+def format_rebuild_done_ping(*, mention: str | None) -> str:
+    who = f" {mention}" if mention and mention.strip() else ""
+    return f"✅ Rebuild complete{who} — gateway is back (`/health` OK)."
+
+
 def format_job_done_ping(
     *,
     mention: str | None,

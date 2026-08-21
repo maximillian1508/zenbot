@@ -29,6 +29,7 @@ from ..handoff import (
 from ..notify import format_close_reply
 from ..scheduler import cron_prompt
 from ..sessions import ThreadSession
+from ..util.rebuild import RebuildNotify, deliver_rebuild_notify_discord
 
 if TYPE_CHECKING:
     from discord.abc import Messageable
@@ -1351,12 +1352,20 @@ class AgentDiscordBot(discord.Client):
                         ephemeral=True,
                     )
                     return
+                channel = interaction.channel
                 path = self.gateway.request_rebuild(
-                    reason=f"discord:/rebuild by {interaction.user.id}"
+                    reason=f"discord:/rebuild by {interaction.user.id}",
+                    notify=RebuildNotify(
+                        transport="discord",
+                        channel_id=str(channel.id if channel else interaction.channel_id),
+                        user_id=str(interaction.user.id),
+                        mention=interaction.user.mention,
+                        agent_id="manager",
+                    ),
                 )
                 await interaction.response.send_message(
                     "Restart requested. Host will `systemctl restart` in ~15s "
-                    f"(flag `{path.name}`). Ping this thread after `/health` is OK."
+                    f"(flag `{path.name}`). I'll ping you here when `/health` is OK."
                 )
 
         @self.tree.error
@@ -1431,6 +1440,7 @@ class AgentDiscordBot(discord.Client):
             ",".join(p.id for p in self.profiles),
             homes,
         )
+        await deliver_rebuild_notify_discord(self, self.gateway.config.data_dir)
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot:

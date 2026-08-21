@@ -36,7 +36,11 @@ from ..sessions import SessionStore, ThreadSession
 from ..skills.loader import build_prompt
 from ..trust_mode import format_trust_status, parse_trust_arg, resolve_trust
 from ..util.proc import terminate_process
-from ..util.rebuild import request_rebuild as write_rebuild_flag, rebuild_pending
+from ..util.rebuild import (
+    RebuildNotify,
+    rebuild_pending,
+    request_rebuild as write_rebuild_flag,
+)
 from ..util.throttle import ThrottledProgress
 from .queue import drop_by_id, promote_by_id, queued_count
 
@@ -978,9 +982,14 @@ class Gateway:
         resolved = resolve_trust(sess.trust_mode, backend=backend_name)
         return format_trust_status(resolved, backend=backend_name)
 
-    def request_rebuild(self, *, reason: str = "") -> Path:
+    def request_rebuild(
+        self,
+        *,
+        reason: str = "",
+        notify: RebuildNotify | None = None,
+    ) -> Path:
         """Ask the host systemd watcher to rebuild this stack (data/REQUEST_REBUILD)."""
-        return write_rebuild_flag(self.config.data_dir, reason=reason)
+        return write_rebuild_flag(self.config.data_dir, reason=reason, notify=notify)
 
     def rebuild_pending(self) -> bool:
         return rebuild_pending(self.config.data_dir)

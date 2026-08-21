@@ -202,7 +202,7 @@ Gateway runs **on the host** (systemd + uv). `/rebuild` does **not** need Docker
 
 1. Manager writes `data/REQUEST_REBUILD` (slash `/rebuild` or agent code)
 2. Host unit `zenbot-rebuild.path` → `scripts/deploy.sh` (15s delay → `systemctl restart zen-agent-bot`)
-3. User pings the **same thread** after `/health` OK
+3. Gateway pings the requester in the same Discord thread / Telegram chat when `/health` is OK
 
 **One-time host install:**
 
