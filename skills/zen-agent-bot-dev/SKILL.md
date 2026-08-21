@@ -179,6 +179,7 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 - ~~**`/handoff` + Ask Manager**~~ ✅ — pick agent or one-click manager; new public thread + transcript
 - ~~**OpenRouter chat window**~~ ✅ — SQLite last ~20 turns per thread; `/new` clears
 - Optional @mention wake in shared channels (default stays dedicated home channels)
+- **Backend-aware UX (2026-08-21)** — `/model` autocomplete/catalog + other Cursor-hardwired paths must respect the thread's effective backend (Claude ids on `claude-cli`, OpenRouter ids on `openrouter`); see ROADMAP build order #17
 
 **P3 — interactive control plane (2026-08-20)**
 

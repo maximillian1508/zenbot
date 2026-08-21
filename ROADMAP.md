@@ -225,6 +225,10 @@ routing:
 14. ~~cursor-sdk local~~ ✅ — `/backend cursor-sdk` (`sdk`); Accept/Deny still P3+
 15. extra bindings / OpenRouter tools
 16. **Interactive control plane (P3)** — SDK Approve/Deny + secure prompt for sudo/secrets; see dedicated section
+17. **Backend-aware UX (2026-08-21)** — make everything currently hardwired to Cursor respect the thread's effective backend:
+    - `/model` autocomplete + catalog: today always `agent models` (Cursor catalog — Grok/GPT/etc.). Should list Claude models on `claude-cli`, OpenRouter ids on `openrouter`, Cursor catalog only on `cursor-cli`/`cursor-sdk`.
+    - Model-not-in-catalog warning: only meaningful for Cursor backends; skip or use per-backend catalog elsewhere.
+    - Audit other Cursor-only paths (`agent status` in admin, session/resume assumptions, `/trust` messaging on non-SDK backends) and gate or adapt per backend.
 
 ---
 
