@@ -164,6 +164,59 @@ class ApprovalBridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("streaming", restore[-1][0])
             bridge.unbind_job("s1")
 
+    async def test_superseded_request_keeps_new_prompt(self) -> None:
+        """Request B replacing A must not have A's cleanup stomp B's prompt."""
+        bridge = ApprovalBridge()
+        edits: list[tuple[str, dict[str, object]]] = []
+
+        async def edit(text: str, **kwargs: object) -> None:
+            edits.append((text, kwargs))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge.bind_job(
+                session_key="s1",
+                workspace=Path(tmp),
+                edit_status=edit,
+                display_name="Manager",
+                running_view="cancel-view",
+            )
+            task_a = asyncio.create_task(
+                bridge.request(
+                    session_key="s1",
+                    kind="shell",
+                    summary="ls tmp",
+                    detail="ls tmp",
+                    timeout_sec=2,
+                )
+            )
+            await asyncio.sleep(0.05)
+            task_b = asyncio.create_task(
+                bridge.request(
+                    session_key="s1",
+                    kind="shell",
+                    summary="ls -la /tmp",
+                    detail="ls -la /tmp",
+                    timeout_sec=2,
+                )
+            )
+            await asyncio.sleep(0.05)
+            # A was auto-denied by B's registration and finished.
+            self.assertFalse(await task_a)
+            # B is still the live prompt: awaiting stays set, no cancel-view
+            # restore may have run, and B's prompt must be the last edit.
+            self.assertTrue(bridge.is_awaiting("s1"))
+            restores = [e for e in edits if e[1].get("view") == "cancel-view"]
+            self.assertFalse(restores)
+            self.assertIn("ls -la /tmp", edits[-1][0])
+            pending = bridge.list_pending()
+            self.assertEqual(len(pending), 1)
+            bridge.resolve(pending[0]["id"], allow=True, reason="test")
+            self.assertTrue(await task_b)
+            # Now that B is done, the running view is restored once.
+            restores = [e for e in edits if e[1].get("view") == "cancel-view"]
+            self.assertEqual(len(restores), 1)
+            bridge.unbind_job("s1")
+
     async def test_cancel_during_approval_skips_restore(self) -> None:
         bridge = ApprovalBridge()
         edits: list[tuple[str, dict[str, object]]] = []

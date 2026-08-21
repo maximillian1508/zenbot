@@ -216,7 +216,6 @@ class ApprovalBridge:
             self.resolve(approval_id, allow=False, reason="timeout")
             return False
         finally:
-            job.awaiting_approval = False
             for task in waiters:
                 if not task.done():
                     task.cancel()
@@ -225,12 +224,18 @@ class ApprovalBridge:
                     await task
             async with self._lock:
                 self._pending.pop(approval_id, None)
-                if self._by_session.get(session_key) == approval_id:
+                # A newer request for this session may have replaced us
+                # (parallel tool calls); if so, it owns the prompt now —
+                # don't clear its awaiting flag or stomp its Accept/Deny.
+                is_current = self._by_session.get(session_key) == approval_id
+                if is_current:
                     self._by_session.pop(session_key, None)
-            if not job.cancelled and not (
-                job.cancel_event is not None and job.cancel_event.is_set()
-            ):
-                await self._restore_running_status(job)
+            if is_current:
+                job.awaiting_approval = False
+                if not job.cancelled and not (
+                    job.cancel_event is not None and job.cancel_event.is_set()
+                ):
+                    await self._restore_running_status(job)
 
     @staticmethod
     async def _await_future(future: asyncio.Future[bool]) -> bool:
@@ -242,6 +247,9 @@ class ApprovalBridge:
         if job.cancelled or (
             job.cancel_event is not None and job.cancel_event.is_set()
         ):
+            return
+        if job.awaiting_approval:
+            # Another approval is showing its prompt — leave it alone.
             return
         text = (job.progress_text or "").strip() or "⏳ Agent running…"
         if limit_notice:
