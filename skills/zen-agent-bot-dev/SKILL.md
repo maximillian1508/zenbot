@@ -177,6 +177,7 @@ See also **Decisions (2026-08-12)** and **Model selection (2026-08-13)** in `ROA
 - ~~cursor-sdk local~~ ✅ — `/backend cursor-sdk` (`sdk`); stream + cancel + resume; Accept/Deny still P3+
 - ~~Cron / scheduled jobs~~ ✅ — admin **Schedules** + `/schedule`; one Discord thread per schedule
 - ~~**`/handoff` + Ask Manager**~~ ✅ — pick agent or one-click manager; new public thread + transcript
+- ~~**Handoff to existing thread + start-time backend/model (2026-08-21)**~~ ✅ — `/handoff to_thread:<thread>` sends the transcript into a running agent thread (keeps its agent/resume/settings); `/manager` `/general` `/music` `/run` `/handoff` accept optional `backend:` + `model:` (backend-aware autocomplete) applied to the new thread
 - ~~**OpenRouter chat window**~~ ✅ — SQLite last ~20 turns per thread; `/new` clears
 - Optional @mention wake in shared channels (default stays dedicated home channels)
 - ~~**Backend-aware UX (2026-08-21)**~~ ✅ — `/model` autocomplete/catalog follow the thread's effective backend (Claude ids on `claude-cli`, live OpenRouter catalog on `openrouter`, `agent models` only on Cursor backends)

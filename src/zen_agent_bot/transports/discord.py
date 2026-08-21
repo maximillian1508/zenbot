@@ -26,6 +26,7 @@ from ..handoff import (
     format_handoff_prompt,
     format_transcript_lines,
 )
+from ..backend_select import parse_backend_arg
 from ..notify import format_close_reply
 from ..scheduler import cron_prompt
 from ..sessions import ThreadSession
@@ -722,6 +723,8 @@ class AgentDiscordBot(discord.Client):
         target: AgentProfile,
         author: discord.abc.User,
         note: str,
+        backend: str | None = None,
+        model: str | None = None,
     ) -> discord.Thread:
         if not isinstance(source, discord.Thread):
             raise HandoffError("Use `/handoff` inside a thread (the one you want to pass on).")
@@ -761,6 +764,10 @@ class AgentDiscordBot(discord.Client):
         await thread.send(f"{prompt[:500]}{extra}")
         sess_key = self.gateway.session_key(target.id, "discord", thread_key(thread))
         self.gateway.store.set(sess_key, ThreadSession(session_id=None, title=title))
+        if backend:
+            self.gateway.store.set_backend(sess_key, backend)
+        if model:
+            self.gateway.store.set_model(sess_key, model)
         status_msg = await thread.send("⏳ Agent running…")
         self._launch_job(
             profile=target,
@@ -770,6 +777,54 @@ class AgentDiscordBot(discord.Client):
             mention=getattr(author, "mention", None),
         )
         return thread
+
+    async def handoff_to_existing(
+        self,
+        *,
+        source: object,
+        dest: discord.Thread,
+        author: discord.abc.User,
+        note: str,
+    ) -> discord.Thread:
+        """Transfer this thread's transcript into an existing agent thread.
+
+        The destination keeps its own agent, session (`--resume`), backend, and
+        model — the transcript just arrives as the next message in it.
+        """
+        if not isinstance(source, discord.Thread):
+            raise HandoffError("Use `/handoff` inside a thread (the one you want to pass on).")
+        if dest.id == source.id:
+            raise HandoffError("Target thread is this same thread.")
+        target = self._profile_for_channel(dest)
+        if target is None:
+            raise HandoffError(
+                f"{dest.mention} isn't an agent thread (no agent owns its channel)."
+            )
+        await unarchive_agent_thread(source)
+        await unarchive_agent_thread(dest)
+        source_profile = self._profile_for_channel(source)
+        transcript = await self._thread_transcript(source)
+        prompt = format_handoff_prompt(
+            source_agent=source_profile.id if source_profile else "unknown",
+            source_title=source.name or "(untitled)",
+            source_url=str(getattr(source, "jump_url", "") or ""),
+            target_display=target.display_name,
+            note=note,
+            transcript=transcript,
+        )
+        sess_key = self.gateway.session_key(target.id, "discord", thread_key(dest))
+        await dest.send(
+            f"↪️ **Context transfer** from {source.mention} {author.mention}"
+        )
+        status_msg = await dest.send("⏳ Agent running…")
+        self._launch_job(
+            profile=target,
+            sess_key=sess_key,
+            prompt=prompt,
+            status_msg=status_msg,
+            mention=getattr(author, "mention", None),
+        )
+        return dest
 
     def _launch_job(
         self,
@@ -839,6 +894,8 @@ class AgentDiscordBot(discord.Client):
         title_src: str,
         preview_text: str,
         binding: dict[str, Any] | None = None,
+        backend: str | None = None,
+        model: str | None = None,
     ) -> discord.Thread:
         title = title_from_prompt(title_src)
         thread = await home.create_thread(name=title[:100], auto_archive_duration=10080)
@@ -862,6 +919,10 @@ class AgentDiscordBot(discord.Client):
             )
             prompt = merge_prompt_with_attachments(preview_text or title_src, saved)
         self.gateway.store.set(sess_key, ThreadSession(session_id=None, title=title))
+        if backend:
+            self.gateway.store.set_backend(sess_key, backend)
+        if model:
+            self.gateway.store.set_model(sess_key, model)
         status_msg = await thread.send("⏳ Agent running…")
         self._launch_job(
             profile=profile,
@@ -988,11 +1049,62 @@ class AgentDiscordBot(discord.Client):
                 return None
         return ch
 
+    def _parse_backend_opt(self, raw: str | None) -> str | None:
+        """Canonical backend id from a slash option, or None. Raises ValueError."""
+        if not raw or not raw.strip():
+            return None
+        action, value = parse_backend_arg(raw, known=self.gateway.known_backends())
+        if action != "set" or not value:
+            raise ValueError(f"Invalid backend `{raw}`.")
+        return value
+
+    def _backend_choices(self, current: str) -> list[app_commands.Choice[str]]:
+        q = current.lower().strip()
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name in sorted(self.gateway.known_backends())
+            if not q or q in name
+        ][:25]
+
+    async def _model_choices_for_backend(
+        self, backend: str, current: str
+    ) -> list[app_commands.Choice[str]]:
+        q = current.lower().strip()
+        try:
+            models = await self.gateway.models_for_backend(backend)
+        except Exception:
+            models = []
+        choices: list[app_commands.Choice[str]] = []
+        for mid, label in models:
+            hay = f"{mid} {label}".lower()
+            if q and q not in hay:
+                continue
+            display = f"{label} · {mid}" if label != mid else mid
+            if len(display) > 100:
+                display = display[:97] + "…"
+            choices.append(app_commands.Choice(name=display, value=mid[:100]))
+            if len(choices) >= 25:
+                break
+        return choices
+
+    def _start_backend_for(
+        self, interaction: discord.Interaction, profile: AgentProfile
+    ) -> str:
+        """Backend a new slash-started thread would use: typed option or profile default."""
+        raw = getattr(interaction.namespace, "backend", None)
+        try:
+            picked = self._parse_backend_opt(raw)
+        except ValueError:
+            picked = None
+        return picked or profile.default_backend or "cursor-cli"
+
     async def _slash_start(
         self,
         interaction: discord.Interaction,
         profile: AgentProfile,
         prompt: str,
+        backend: str | None = None,
+        model: str | None = None,
     ) -> None:
         if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
             await interaction.response.send_message("Not authorized.", ephemeral=True)
@@ -1007,6 +1119,12 @@ class AgentDiscordBot(discord.Client):
                 ephemeral=True,
             )
             return
+        try:
+            backend = self._parse_backend_opt(backend)
+        except ValueError as exc:
+            await interaction.response.send_message(f"⚠️ {exc}", ephemeral=True)
+            return
+        model = (model or "").strip() or None
         await interaction.response.defer(ephemeral=False)
         home = await self._home_channel(profile)
         if home is None:
@@ -1025,9 +1143,15 @@ class AgentDiscordBot(discord.Client):
             saved=[],
             title_src=prompt,
             preview_text=prompt,
+            backend=backend,
+            model=model,
         )
+        overrides = " · ".join(
+            f"`{v}`" for v in (backend, model) if v
+        )
+        note = f" ({overrides})" if overrides else ""
         await interaction.edit_original_response(
-            content=f"Started **{profile.display_name}** in {thread.mention}"
+            content=f"Started **{profile.display_name}** in {thread.mention}{note}"
         )
 
     async def setup_hook(self) -> None:
@@ -1280,9 +1404,18 @@ class AgentDiscordBot(discord.Client):
             name="run",
             description="Start a job as a specialist (opens a thread in that agent's channel)",
         )
-        @app_commands.describe(agent="Profile id", prompt="What the agent should do")
+        @app_commands.describe(
+            agent="Profile id",
+            prompt="What the agent should do",
+            backend="Backend for the new thread (optional)",
+            model="Model for the new thread (optional)",
+        )
         async def cmd_run(
-            interaction: discord.Interaction, agent: str, prompt: str
+            interaction: discord.Interaction,
+            agent: str,
+            prompt: str,
+            backend: str | None = None,
+            model: str | None = None,
         ) -> None:
             target = self._resolve_agent(agent)
             if target is None:
@@ -1291,7 +1424,7 @@ class AgentDiscordBot(discord.Client):
                     ephemeral=True,
                 )
                 return
-            await self._slash_start(interaction, target, prompt)
+            await self._slash_start(interaction, target, prompt, backend, model)
 
         @cmd_run.autocomplete("agent")
         async def run_autocomplete(
@@ -1301,28 +1434,92 @@ class AgentDiscordBot(discord.Client):
                 return []
             return self._agent_choices(current)
 
+        @cmd_run.autocomplete("backend")
+        async def run_backend_autocomplete(
+            interaction: discord.Interaction, current: str
+        ) -> list[app_commands.Choice[str]]:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                return []
+            return self._backend_choices(current)
+
+        @cmd_run.autocomplete("model")
+        async def run_model_autocomplete(
+            interaction: discord.Interaction, current: str
+        ) -> list[app_commands.Choice[str]]:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                return []
+            target = self._resolve_agent(
+                str(getattr(interaction.namespace, "agent", "") or "")
+            )
+            if target is None:
+                return []
+            backend = self._start_backend_for(interaction, target)
+            return await self._model_choices_for_backend(backend, current)
+
         @self.tree.command(
             name="handoff",
-            description="Send this thread to another agent (pick who continues)",
+            description="Send this thread's context to another agent or an existing thread",
         )
         @app_commands.describe(
-            agent="Who should continue (manager, general, music, …)",
+            agent="Who continues in a NEW thread (manager, general, music, …)",
+            to_thread="…or an EXISTING agent thread to receive the context",
             note="Optional extra instruction for them",
+            backend="Backend for the new thread (optional; new-thread handoff only)",
+            model="Model for the new thread (optional; new-thread handoff only)",
         )
         async def cmd_handoff(
             interaction: discord.Interaction,
-            agent: str,
+            agent: str | None = None,
+            to_thread: discord.Thread | None = None,
             note: str | None = None,
+            backend: str | None = None,
+            model: str | None = None,
         ) -> None:
             if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
                 await interaction.response.send_message("Not authorized.", ephemeral=True)
                 return
-            target = self._resolve_agent(agent)
+            if (agent is None) == (to_thread is None):
+                await interaction.response.send_message(
+                    "Pick exactly one destination: `agent:` (new thread) or "
+                    "`to_thread:` (existing thread).",
+                    ephemeral=True,
+                )
+                return
+            if to_thread is not None:
+                if backend or model:
+                    await interaction.response.send_message(
+                        "`backend:`/`model:` only apply to new-thread handoffs — "
+                        "the existing thread keeps its own settings "
+                        "(use `/backend` / `/model` there).",
+                        ephemeral=True,
+                    )
+                    return
+                await interaction.response.defer()
+                try:
+                    dest = await self.handoff_to_existing(
+                        source=interaction.channel,
+                        dest=to_thread,
+                        author=interaction.user,
+                        note=note or "",
+                    )
+                except HandoffError as exc:
+                    await interaction.followup.send(str(exc), ephemeral=True)
+                    return
+                await interaction.followup.send(
+                    f"Context sent to {dest.mention}"
+                )
+                return
+            target = self._resolve_agent(agent or "")
             if target is None:
                 await interaction.response.send_message(
                     f"Unknown agent `{agent}`. Try `/agents`.",
                     ephemeral=True,
                 )
+                return
+            try:
+                picked_backend = self._parse_backend_opt(backend)
+            except ValueError as exc:
+                await interaction.response.send_message(f"⚠️ {exc}", ephemeral=True)
                 return
             await interaction.response.defer()
             try:
@@ -1331,13 +1528,41 @@ class AgentDiscordBot(discord.Client):
                     target=target,
                     author=interaction.user,
                     note=note or "",
+                    backend=picked_backend,
+                    model=(model or "").strip() or None,
                 )
             except HandoffError as exc:
                 await interaction.followup.send(str(exc), ephemeral=True)
                 return
-            await interaction.followup.send(
-                f"Handed off to **{target.display_name}** → {thread.mention}"
+            overrides = " · ".join(
+                f"`{v}`" for v in (picked_backend, (model or "").strip()) if v
             )
+            suffix = f" ({overrides})" if overrides else ""
+            await interaction.followup.send(
+                f"Handed off to **{target.display_name}** → {thread.mention}{suffix}"
+            )
+
+        @cmd_handoff.autocomplete("backend")
+        async def handoff_backend_autocomplete(
+            interaction: discord.Interaction, current: str
+        ) -> list[app_commands.Choice[str]]:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                return []
+            return self._backend_choices(current)
+
+        @cmd_handoff.autocomplete("model")
+        async def handoff_model_autocomplete(
+            interaction: discord.Interaction, current: str
+        ) -> list[app_commands.Choice[str]]:
+            if not interaction.user or not self.gateway.is_allowed(interaction.user.id):
+                return []
+            target = self._resolve_agent(
+                str(getattr(interaction.namespace, "agent", "") or "")
+            )
+            if target is None:
+                return []
+            backend = self._start_backend_for(interaction, target)
+            return await self._model_choices_for_backend(backend, current)
 
         @cmd_handoff.autocomplete("agent")
         async def handoff_autocomplete(
@@ -1353,17 +1578,49 @@ class AgentDiscordBot(discord.Client):
                 continue
 
             def _make_alias(target: AgentProfile) -> Any:
-                @app_commands.describe(prompt="What this agent should do")
-                async def _alias(interaction: discord.Interaction, prompt: str) -> None:
-                    await self._slash_start(interaction, target, prompt)
+                @app_commands.describe(
+                    prompt="What this agent should do",
+                    backend="Backend for the new thread (optional)",
+                    model="Model for the new thread (optional)",
+                )
+                async def _alias(
+                    interaction: discord.Interaction,
+                    prompt: str,
+                    backend: str | None = None,
+                    model: str | None = None,
+                ) -> None:
+                    await self._slash_start(interaction, target, prompt, backend, model)
 
                 _alias.__name__ = f"cmd_{target.id}"
                 return _alias
 
-            self.tree.command(
+            def _make_alias_autocompletes(target: AgentProfile, command: Any) -> None:
+                @command.autocomplete("backend")
+                async def _alias_backend_ac(
+                    interaction: discord.Interaction, current: str
+                ) -> list[app_commands.Choice[str]]:
+                    if not interaction.user or not self.gateway.is_allowed(
+                        interaction.user.id
+                    ):
+                        return []
+                    return self._backend_choices(current)
+
+                @command.autocomplete("model")
+                async def _alias_model_ac(
+                    interaction: discord.Interaction, current: str
+                ) -> list[app_commands.Choice[str]]:
+                    if not interaction.user or not self.gateway.is_allowed(
+                        interaction.user.id
+                    ):
+                        return []
+                    backend = self._start_backend_for(interaction, target)
+                    return await self._model_choices_for_backend(backend, current)
+
+            alias_cmd = self.tree.command(
                 name=slug,
                 description=f"Start {profile.display_name} (thread in its home channel)",
             )(_make_alias(profile))
+            _make_alias_autocompletes(profile, alias_cmd)
 
         if self.has_manager:
 

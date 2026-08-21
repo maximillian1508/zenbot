@@ -226,6 +226,7 @@ routing:
 15. extra bindings / OpenRouter tools
 16. **Interactive control plane (P3)** — SDK Approve/Deny + secure prompt for sudo/secrets; see dedicated section
 17. ~~**Backend-aware UX (2026-08-21)**~~ ✅ — `/model` autocomplete + catalog follow the thread's effective backend: Cursor `agent models` on cursor-cli/sdk, static Claude list on claude-cli (dated snapshot ids pass the warning), live OpenRouter API catalog (600s cache, static fallback) on openrouter. Not-in-catalog warning is per-backend. Remaining audit (admin `agent status`, `/trust` messaging on non-SDK backends) folded into normal upkeep.
+18. ~~**Handoff to existing thread + start-time backend/model (2026-08-21)**~~ ✅ — `/handoff to_thread:<thread>` transfers the transcript into a running agent thread (keeps that thread's agent, `--resume`, backend, model; queues if busy). `/manager` `/general` `/music` `/run` `/handoff` take optional `backend:` + `model:` with backend-aware autocomplete, applied to the new thread's session before the first job.
 
 ---
 
