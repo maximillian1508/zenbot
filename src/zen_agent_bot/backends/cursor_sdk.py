@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from cursor_sdk import (
+    AgentOptions,
     AsyncClient,
     LocalAgentOptions,
     LocalSendOptions,
@@ -127,9 +128,7 @@ class CursorSdkBackend:
             create_kw["api_key"] = api_key
         if resume_id:
             try:
-                options: dict[str, Any] = {"model": model, "local": local}
-                if api_key:
-                    options["api_key"] = api_key
+                options = AgentOptions(model=model, local=local, api_key=api_key or None)
                 return await client.resume_agent(resume_id, options)
             except Exception as exc:
                 log.info("cursor-sdk resume %s failed (%s); creating new agent", resume_id, exc)
