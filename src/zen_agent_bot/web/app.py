@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
+from ..backends.claude_cli import CLAUDE_EFFORT_LEVELS
 from ..schedule import (
     DEFAULT_TZ,
     MAX_NAME,
@@ -25,6 +26,7 @@ from ..schedule import (
     validate_timezone,
 )
 from ..store import ConfigStore
+from ..util.rebuild import request_rebuild as write_rebuild_flag
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -297,6 +299,36 @@ def _truthy_setting(raw: str | None, default: bool = True) -> bool:
     return raw.strip().lower() not in ("0", "false", "no", "off")
 
 
+def _agent_profile_changed(old: dict[str, Any] | None, new: dict[str, Any]) -> bool:
+    """True when a saved agent differs from the stored row (restart needed)."""
+    if old is None:
+        return True
+
+    def norm(row: dict[str, Any]) -> tuple:
+        skills = row.get("skills") or []
+        if isinstance(skills, str):
+            try:
+                skills = json.loads(skills)
+            except json.JSONDecodeError:
+                skills = [s.strip() for s in skills.splitlines() if s.strip()]
+        return (
+            str(row.get("display_name") or ""),
+            str(row.get("workspace") or ""),
+            str(row.get("default_backend") or "cursor-cli"),
+            tuple(str(s) for s in skills),
+            row.get("system_prompt_file") or None,
+            bool(row.get("is_manager")),
+            bool(row.get("discord_enabled")),
+            row.get("discord_token_env") or None,
+            str(row.get("discord_channel_id") or "") or None,
+            bool(row.get("telegram_enabled")),
+            row.get("telegram_token_env") or None,
+            str(row.get("telegram_chat_id") or "") or None,
+        )
+
+    return norm(old) != norm(new)
+
+
 def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> FastAPI:
     app = FastAPI(title="zen-agent-bot admin", docs_url=None, redoc_url=None)
     app.state.db = db
@@ -319,6 +351,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         cursor_model = db.get_setting("backend.cursor-cli.model") or ""
         cursor_sdk_model = db.get_setting("backend.cursor-sdk.model") or ""
         claude_model = db.get_setting("backend.claude-cli.model") or ""
+        claude_effort = db.get_setting("backend.claude-cli.effort") or ""
         openrouter_model = db.get_setting("backend.openrouter.model") or ""
         openrouter_online = _truthy_setting(
             db.get_setting("backend.openrouter.online"), False
@@ -393,6 +426,8 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
           <input type="text" name="cursor_sdk_model" value="{html.escape(cursor_sdk_model)}" placeholder="blank → cursor-cli / composer-2.5"></label>
         <label>claude-cli model
           <input type="text" name="claude_model" value="{html.escape(claude_model)}" placeholder="e.g. sonnet"></label>
+        <label>claude-cli effort (low/medium/high/xhigh/max; blank = CLI default; needs restart)
+          <input type="text" name="claude_effort" value="{html.escape(claude_effort)}" placeholder="e.g. high"></label>
         <label>openrouter model
           <input type="text" name="openrouter_model" value="{html.escape(openrouter_model)}" placeholder="e.g. anthropic/claude-sonnet-4"></label>
         <label><input type="checkbox" name="openrouter_online" {openrouter_online_checked}> OpenRouter web search (append <code>:online</code>; extra $). Next job — no restart. Env <code>OPENROUTER_ONLINE</code> wins if set. Skip if the model already has <code>:online</code>.</label>
@@ -590,6 +625,7 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         cursor_model: str = Form(""),
         cursor_sdk_model: str = Form(""),
         claude_model: str = Form(""),
+        claude_effort: str = Form(""),
         openrouter_model: str = Form(""),
         openrouter_online: str | None = Form(None),
         _: None = Depends(require_auth),
@@ -613,6 +649,13 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         db.set_setting("backend.cursor-cli.model", cursor_model.strip())
         db.set_setting("backend.cursor-sdk.model", cursor_sdk_model.strip())
         db.set_setting("backend.claude-cli.model", claude_model.strip())
+        effort = claude_effort.strip().lower()
+        if effort and effort not in CLAUDE_EFFORT_LEVELS:
+            raise HTTPException(
+                400,
+                f"claude-cli effort must be one of {', '.join(CLAUDE_EFFORT_LEVELS)}",
+            )
+        db.set_setting("backend.claude-cli.effort", effort)
         db.set_setting("backend.openrouter.model", openrouter_model.strip())
         db.set_setting(
             "backend.openrouter.online",
@@ -1032,6 +1075,8 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
                 "</tr>"
             )
         msg = "Saved." if request.query_params.get("saved") else ""
+        if request.query_params.get("rebuild"):
+            msg = "Saved — restart requested; the gateway restarts in ~15s to apply."
         body = f"""
         <p class="hint">Profiles in SQLite. Put token <em>values</em> in
         <a href="/secrets">Secrets</a> (or <code>.env</code>); here you only name the key
@@ -1127,23 +1172,32 @@ def create_admin_app(*, db: ConfigStore, gateway: Gateway | None = None) -> Fast
         _: None = Depends(require_auth),
     ) -> RedirectResponse:
         skill_list = [s.strip() for s in skills.splitlines() if s.strip()]
-        db.upsert_agent(
-            {
-                "id": id.strip(),
-                "display_name": display_name.strip(),
-                "workspace": workspace.strip() or "/home/maxi",
-                "default_backend": default_backend.strip() or "cursor-cli",
-                "skills": skill_list,
-                "system_prompt_file": system_prompt_file.strip() or None,
-                "is_manager": is_manager is not None,
-                "discord_enabled": discord_enabled is not None,
-                "discord_token_env": discord_token_env.strip() or None,
-                "discord_channel_id": discord_channel_id.strip() or None,
-                "telegram_enabled": telegram_enabled is not None,
-                "telegram_token_env": telegram_token_env.strip() or None,
-                "telegram_chat_id": telegram_chat_id.strip() or None,
-            }
-        )
+        agent_id = id.strip()
+        old_row = db.get_agent_row(agent_id)
+        payload = {
+            "id": agent_id,
+            "display_name": display_name.strip(),
+            "workspace": workspace.strip() or "/home/maxi",
+            "default_backend": default_backend.strip() or "cursor-cli",
+            "skills": skill_list,
+            "system_prompt_file": system_prompt_file.strip() or None,
+            "is_manager": is_manager is not None,
+            "discord_enabled": discord_enabled is not None,
+            "discord_token_env": discord_token_env.strip() or None,
+            "discord_channel_id": discord_channel_id.strip() or None,
+            "telegram_enabled": telegram_enabled is not None,
+            "telegram_token_env": telegram_token_env.strip() or None,
+            "telegram_chat_id": telegram_chat_id.strip() or None,
+        }
+        db.upsert_agent(payload)
+        # Agent profiles are a startup snapshot — restart to apply real changes.
+        if _agent_profile_changed(old_row, payload):
+            reason = f"admin: agent config changed ({agent_id})"
+            if gateway is not None:
+                gateway.request_rebuild(reason=reason)
+            else:
+                write_rebuild_flag(db.path.parent, reason=reason)
+            return RedirectResponse("/agents?saved=1&rebuild=1", status_code=303)
         return RedirectResponse("/agents?saved=1", status_code=303)
 
     def _unique_schedule_id(name: str) -> str:
