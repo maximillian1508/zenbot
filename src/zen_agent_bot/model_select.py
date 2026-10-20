@@ -25,6 +25,7 @@ CURSOR_SDK_FALLBACK = "composer-2.5"
 # Static catalog for claude-cli (`claude -p --model …`); aliases resolve to the
 # latest snapshot. Dated snapshot ids (e.g. claude-sonnet-5-20250929) also work.
 CLAUDE_MODELS: list[tuple[str, str]] = [
+    ("claude-opus-5-5", "Claude Opus 5.5"),
     ("claude-fable-5", "Claude Fable 5 — most capable"),
     ("claude-opus-5", "Claude Opus 5"),
     ("claude-sonnet-5", "Claude Sonnet 5"),

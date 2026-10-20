@@ -35,6 +35,7 @@ def build_backends(
                     command=str(cfg.get("command", "claude")),
                     force=bool(cfg.get("force", True)),
                     model=cfg.get("model"),
+                    effort=cfg.get("effort"),
                     timeout_sec=int(cfg.get("timeout_sec", 3600)),
                 )
             )

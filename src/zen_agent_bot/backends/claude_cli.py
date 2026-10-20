@@ -17,11 +17,15 @@ from .base import (
 )
 
 
+CLAUDE_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+
 @dataclass(frozen=True)
 class ClaudeCliConfig:
     command: str = "claude"
     force: bool = True  # → --dangerously-skip-permissions
     model: str | None = None
+    effort: str | None = None  # → --effort (low…max); None = CLI default
     timeout_sec: int = 3600
 
 
@@ -66,6 +70,8 @@ class ClaudeCliBackend:
             cmd.append("--dangerously-skip-permissions")
         if model:
             cmd.extend(["--model", model])
+        if self.config.effort:
+            cmd.extend(["--effort", self.config.effort])
         resume = _usable_resume(session_id)
         if resume:
             cmd.extend(["--resume", resume])

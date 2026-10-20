@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ..agents.registry import AgentRegistry
 from ..backends import AgentBackend, build_backends
+from ..backends.claude_cli import CLAUDE_EFFORT_LEVELS
 from ..store import ConfigStore
 
 
@@ -115,6 +116,14 @@ def load_config() -> GatewayConfig:
     claude_model = (
         os.environ.get("CLAUDE_MODEL") or db.get_setting("backend.claude-cli.model") or None
     )
+    claude_effort = (
+        (os.environ.get("CLAUDE_EFFORT") or db.get_setting("backend.claude-cli.effort") or "")
+        .strip()
+        .lower()
+        or None
+    )
+    if claude_effort and claude_effort not in CLAUDE_EFFORT_LEVELS:
+        claude_effort = None  # invalid level would fail every claude job
     backends = build_backends(
         {
             "cursor-cli": {
@@ -128,6 +137,7 @@ def load_config() -> GatewayConfig:
                 "command": claude_command,
                 "force": claude_force,
                 "model": claude_model,
+                "effort": claude_effort,
             },
             "openrouter": {
                 "kind": "openrouter",
